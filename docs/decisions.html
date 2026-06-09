@@ -26,7 +26,7 @@
       <div class="kk"><div class="t">Storage + audit</div><div>Medallion (Delta) + Unity Catalog + an append-only event log. <a href="storage-audit.html">⑤</a></div></div>
       <div class="kk"><div class="t">Two audit layers</div><div>Business event log (state changes) + MLflow tracing (model calls). MLflow wired in code, ~2 lines.</div></div>
       <div class="kk"><div class="t">LLM layer</div><div>DSPy typed signature = model interface + validation contract in one. <a href="concepts.html">★</a></div></div>
-      <div class="kk"><div class="t">Model tiering</div><div>Speed-first: tier-1 <code>gemini-3-5-flash</code> (fast, vision) → escalate to <code>claude-opus-4-8</code> on low confidence. <a href="extensibility.html">⑥</a></div></div>
+      <div class="kk"><div class="t">Model tiering</div><div>Speed-first cascade. Deployed POC (Free Edition): tier-1 <code>gemma-3-12b</code> (vision) → tier-2 <code>meta-llama-3-3-70b-instruct</code>. Production: <code>gemini-3-5-flash</code> → <code>claude-opus-4-8</code> — same code, two env vars. <a href="extensibility.html">⑥</a></div></div>
       <div class="kk"><div class="t">Extensibility</div><div>Store raw + page-chunks + embeddings + metadata now → summarization/Q&A becomes a later DSPy signature. <a href="extensibility.html">⑥</a></div></div>
       <div class="kk"><div class="t">Code scope</div><div>Lean core — PDF → text/VLM extract → validate → async. No classifier/OCR/multi-format in code. <a href="task2-service.html">⑨</a></div></div>
       <div class="kk"><div class="t">Persistence</div><div>Delta (delta-rs locally, Unity Catalog deployed). Job-status in Delta is fine at POC volume; transactional store at scale.</div></div>

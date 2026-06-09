@@ -21,7 +21,7 @@
       <tr><th>Decision</th><th>In one line</th></tr>
       <tr><td><b>Classify then route</b></td><td>Rules scorer over text → escalate to an LLM if unsure → each doc type gets its own extractor + schema</td></tr>
       <tr><td><b>Extract with DSPy</b></td><td>A typed signature = the LLM interface and the validation contract in one object</td></tr>
-      <tr><td><b>Model tiering</b></td><td>Gemini Flash by default, escalate to Claude Opus only on low confidence (speed + cost)</td></tr>
+      <tr><td><b>Model tiering</b></td><td>Fast tier by default → premium only on low confidence (speed + cost). POC runs open-weight <code>gemma-3-12b</code> → <code>llama-3-3-70b</code> on Free Edition; production swaps to Gemini Flash → Claude Opus</td></tr>
       <tr><td><b>Fail gracefully</b></td><td>Nothing guessed — escalate, then a human; every decision recorded</td></tr>
       <tr><td><b>Native audit</b></td><td>Append-only log + Delta history + Unity Catalog lineage/access + MLflow — configured, not built</td></tr>
       <tr><td><b>Async API</b></td><td>Job id returned instantly, processed on a worker, polled for the result</td></tr>

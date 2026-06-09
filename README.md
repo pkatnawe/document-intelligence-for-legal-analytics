@@ -43,28 +43,73 @@ and audit trail. See [`scripts/ingest_dataset.py`](scripts/ingest_dataset.py).
 | **(b)** Image-only scan / corrupt text layer | Detected in `load_pdf`; page rendered to PNG → vision model | [`app/documents/loader.py`](app/documents/loader.py), [`app/extract.py`](app/extract.py) |
 | **(c)** Transient API error | Retried with exponential backoff; deterministic errors are **not** retried | [`app/extract.py`](app/extract.py) (`_predict`) |
 
-## Structure
+## Structure — mapped to the case's "clear separation" requirement
+
+The brief asks for *"a proper backend component with clear separation between document
+handling, LLM interaction, and output validation."* That is the layout — **each concern is
+its own package, and no concern leaks into another** (verified by imports):
 
 ```
 app/
-├─ documents/loader.py    # text-layer detection + page rendering (case b)
-├─ documents/splitter.py  # ingestion preprocess: multi-invoice PDF → single-invoice docs
-├─ llm/signatures.py      # DSPy typed signatures (text + vision)
-├─ llm/client.py          # DSPy ↔ Databricks serving endpoints; model tiers
-├─ validation/schema.py   # Pydantic Invoice — the single source of truth
-├─ extract.py             # orchestration: cascade + the three failure paths
-├─ store.py               # JobStore Protocol + in-memory test double (no SQLite)
-├─ store_delta.py         # Delta + UC Volume store (bound-parameter SQL); the runtime store
-├─ observability.py       # structlog + mlflow.dspy.autolog → Databricks experiment
-├─ web.py                 # the upload UI (served at /), shows lifecycle + audit trail
-└─ api.py                 # FastAPI: POST /api/ingest (split→jobs), /api/extract, GET /api/jobs/{id}[/audit]
-app.py                    # entry point (Databricks Apps / local uvicorn)
-app.yaml                  # Databricks Apps runtime config
-databricks.yml            # Asset Bundle (deploys the App)
-scripts/ingest_dataset.py # split the case PDF + drive the API end-to-end
-scripts/smoke_test.py     # 60-second check that a serving endpoint is reachable
-tests/                    # unit tests: schema, store, splitter, loader, orchestration
+│  ── ① DOCUMENT HANDLING ──  (only bytes + PyMuPDF; no model, no schema)
+├─ documents/loader.py     # text-layer detection; render scans to images (case b)
+├─ documents/splitter.py   # ingestion preprocess: multi-invoice PDF → single-invoice docs
+│
+│  ── ② LLM INTERACTION ──  (the only place a model is ever called)
+├─ llm/signatures.py       # DSPy typed signatures: declared inputs → Invoice output
+├─ llm/client.py           # wires DSPy to Databricks endpoints; the fast/premium tiers
+│
+│  ── ③ OUTPUT VALIDATION ──  (pure Pydantic; no model, no I/O)
+├─ validation/schema.py    # the Invoice contract — the single source of truth
+│
+│  ── orchestration + platform (wire the three together; don't mix them) ──
+├─ extract.py              # the cascade + the three failure paths (a/b/c)
+├─ store.py / store_delta.py  # JobStore Protocol → Delta + UC Volume + audit (runtime)
+├─ observability.py        # structlog + mlflow.dspy.autolog → Databricks experiment
+├─ web.py                  # the upload UI served at /
+└─ api.py                  # FastAPI: POST /api/ingest, /api/extract, GET /api/jobs/{id}[/audit]
+app.py / app.yaml / databricks.yml   # entry point · Apps runtime config · Asset Bundle
+scripts/ingest_dataset.py  # split the case PDF + drive the API end-to-end
+scripts/smoke_test.py      # 60-second check that a serving endpoint is reachable
+tests/                     # schema · store · splitter · loader · orchestration (20 tests)
 ```
+
+### How the separation actually holds
+
+The three concerns never touch each other directly — they only meet inside the orchestrator,
+which calls each in turn:
+
+```
+process_job(extract.py):
+   bytes ──▶ ① load_pdf(data)              # document handling: is there text? else render image
+         ──▶ ② run_extraction(text|image)  # LLM interaction: DSPy calls the tiered model
+         ──▶ ③ returns a validated Invoice # output validation: enforced at the DSPy boundary
+         ──▶ persist (store) + audit
+```
+
+- **① Document handling** (`documents/`) imports only `fitz` — it decides text-vs-vision and
+  never knows what a model or a schema is.
+- **② LLM interaction** (`llm/`) is the *only* code that talks to a model. Swapping the model
+  tier is one line in `client.py`; nothing else changes.
+- **③ Validation is structural, not hand-rolled.** The DSPy signature declares its output type
+  as the Pydantic `Invoice`, so DSPy coerces the model's output to that schema and raises
+  `AdapterParseError` if it doesn't fit — that *is* failure case (a). There is no bespoke
+  JSON-parsing/validation code to drift; the schema is the contract.
+
+The **DSPy typed signature is the deliberate seam** between ② and ③: it is simultaneously the
+model interface (declared inputs) and the validation contract (the `Invoice` output type), so
+the two layers connect at exactly one typed boundary. The orchestrator (`extract.py`) only
+sequences the steps and handles failures — it contains no PDF parsing and defines no schema.
+
+The brief's other two Task-2 asks are covered the same structural way:
+
+- **A proper backend, not a script/notebook.** It's an installable package (`app/`) behind a
+  FastAPI service with a swappable `JobStore` interface and a unit-test suite — runnable
+  locally (`uvicorn`) or deployed unchanged to Databricks Apps.
+- **Structured logging at key steps.** Two layers, both machine-queryable: `observability.py`
+  emits JSON logs via `structlog`, and every processing step writes an append-only **audit
+  event** (`RECEIVED → RUNNING → STORED → READ → SUCCEEDED/FAILED`) to Delta — so "what
+  happened to this document" is a query, not a grep.
 
 ## Run it — two ways
 

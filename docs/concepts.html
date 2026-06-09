@@ -24,7 +24,7 @@
     </div>
     <div class="card">
       <h3>Model tiering</h3>
-      <p style="font-size:13.5px">The escalation in concrete terms: a fast default model (tier-1, <code>gemini-3-5-flash</code>) handles most documents; only low-confidence ones reach the premium model (tier-2, <code>claude-opus-4-8</code>). <b>Why:</b> one dial that serves both speed and quality — and with DSPy, swapping a tier is a one-line change.</p>
+      <p style="font-size:13.5px">The escalation in concrete terms: a fast default model (tier-1) handles most documents; only low-confidence ones reach the premium model (tier-2). The deployed POC runs <code>gemma-3-12b</code> → <code>meta-llama-3-3-70b-instruct</code> (open-weight, what Free Edition serves); production swaps to <code>gemini-3-5-flash</code> → <code>claude-opus-4-8</code>. <b>Why:</b> one dial that serves both speed and quality — and with DSPy, swapping a tier is a one-line change.</p>
     </div>
     <div class="card">
       <h3>Classification-guided extraction</h3>
@@ -69,7 +69,7 @@
     </div>
     <div class="card">
       <h3>VLM &amp; OCR</h3>
-      <p style="font-size:13.5px"><b>OCR</b> reads characters off an image (deterministic, fails by garbling characters). A <b>VLM</b> is an LLM that can see images and reason over layout (higher accuracy, but can hallucinate). <b>In our plan:</b> OCR reads scans for classification; the VLM extracts hard scans — tier-1 <code>gemini-3-5-flash</code>, escalate to <code>claude-opus-4-8</code>.</p>
+      <p style="font-size:13.5px"><b>OCR</b> reads characters off an image (deterministic, fails by garbling characters). A <b>VLM</b> is an LLM that can see images and reason over layout (higher accuracy, but can hallucinate). <b>In our plan:</b> OCR reads scans for classification; the VLM extracts scans — in the POC that's <code>gemma-3-12b</code> (vision), with production escalating to the vision-capable <code>claude-opus-4-8</code>.</p>
     </div>
 
     <h2>Framework / tooling</h2>
@@ -157,8 +157,12 @@
     <h2>Models we could evaluate</h2>
     <p class="lead">Keep these as benchmark candidates — we can A/B several later against the same invoices (the KIE-HVQA degraded set is ready-made for it).</p>
     <div class="card">
-      <h3>In use today — the two tiers</h3>
-      <p style="font-size:13.5px"><code>gemini-3-5-flash</code> (fast default) and <code>claude-opus-4-8</code> (premium escalation). Both are Databricks-native and callable now, so the POC runs on these.</p>
+      <h3>Running now (Free-Edition POC)</h3>
+      <p style="font-size:13.5px">The deployed app actually runs open-weight tiers, because Free Edition disables the proprietary models: <b>tier-1 <code>databricks-gemma-3-12b</code></b> (vision-capable — reads the scanned invoices) and <b>tier-2 <code>databricks-meta-llama-3-3-70b-instruct</code></b> (text). These are what produced the verified extractions.</p>
+    </div>
+    <div class="card">
+      <h3>Production target (paid workspace)</h3>
+      <p style="font-size:13.5px">Swap the two env vars and the same code runs on <code>databricks-gemini-3-5-flash</code> (tier-1, fast + vision) escalating to <code>databricks-claude-opus-4-8</code> (tier-2, "complex extraction… document understanding", and vision-capable so the escalation also covers scans). This is the whole point of model choice being <i>config, not code</i>.</p>
     </div>
     <div class="card">
       <h3>Specialist candidate — Qwen2.5-VL-7B-SFT (Multi-VIE)</h3>
