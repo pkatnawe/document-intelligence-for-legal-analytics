@@ -7,6 +7,7 @@ const NAV = [
   ]},
   {g:'★ Deliverable', items:[
     {f:'slides.html',         n:'▣ The Two Slides',          s:'d'},
+    {f:'presentation.html',   n:'🎤 Presentation Prep',      s:'d'},
   ]},
   {g:'Part 1 — Architecture (locked)', items:[
     {f:'architecture.html',   n:'② Platform · Slide A',      s:'d'},

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>🎤 Presentation Prep</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Prep · for me, not the panel</div>
+    <h1>The 10-minute technical walkthrough <span class="b parked">private prep — don't screen-share this page</span></h1>
+    <p class="lead">A run-of-show for presenting to experienced engineers: trade-offs, data flow, and bottlenecks — not marketing. Skip the high-level fluff; they value design viability. Present from <a href="slides.html">▣ The Two Slides</a> and the live app; keep this open as the map.</p>
+
+    <div class="callout win"><strong>The one idea everything hangs on — say it in the first minute, then let it recur.</strong> <b>Confidence-gated escalation:</b> a cheap, deterministic path handles the easy majority; escalate to a stronger model only when unsure; <b>never guess</b> — the final step is always a human. It shows up at classify, at extract, at validate, in the cost math, and in the improvement loop. If they remember one sentence, it's this.</div>
+
+    <h2>Run-of-show (10 min)</h2>
+    <table>
+      <tr><th>Time</th><th>Show / say</th><th>The point you're scoring</th></tr>
+      <tr><td><b>0–2</b><br>Frame</td><td>The problem from the case: messy Claims docs, ~$15–25/doc by hand, and — because it's legal — every value must be <b>defensible</b>. Then the constraints (below) and the chosen pattern: confidence-gated cascade + typed extraction.</td><td>"I understood the assignment; here are the numbers it has to hit."</td></tr>
+      <tr><td><b>2–6</b><br>System</td><td>Walk the block diagram once (data flow), then the AI lifecycle: model choice, inference path, storage, and what's deferred (RAG/vector). Name the frameworks — no black boxes.</td><td>Design viability: real components, real trade-offs.</td></tr>
+      <tr><td><b>6–8</b><br>Failure</td><td>The three required failure modes + the correctness check, each ending in a human. Then Day-2 ops (monitoring, drift, fallback, audit) and the weakest points — name them first.</td><td>This is where the rubric lives: judgment under failure.</td></tr>
+      <tr><td><b>8–10</b><br>Q&A</td><td>Buffer. Pull up the live app or the supporting docs on demand.</td><td>Depth on demand; let them drive.</td></tr>
+    </table>
+
+    <h2>① Lead with the system constraints (minute 0–2)</h2>
+    <table>
+      <tr><th>Constraint</th><th>Target / boundary</th><th>How the design meets it</th></tr>
+      <tr><td><b>Latency</b></td><td>User-facing response in <b>ms</b>, independent of model time</td><td>Async: <code>POST /api/ingest</code> → <b>202 + job id</b> immediately; extraction on a background worker; client polls. Extraction itself is seconds, dominated by the tier-1 model.</td></tr>
+      <tr><td><b>Throughput</b></td><td>POC 100s–1000s; design must grow without a rewrite</td><td>Ingest decoupled from extract; each doc independent → workers fan out. Scale path: worker → <b>Databricks Workflows</b> (autoscale) behind a durable queue; endpoints pay-per-token → <b>provisioned throughput</b>.</td></tr>
+      <tr><td><b>Cost</b></td><td>≪ the ~$15–25/doc manual cost</td><td>~$0.005/doc via the cascade — cheap model on the ~90% easy bulk, premium only on the hard tail (FrugalGPT: up to ~98% cheaper than premium-everywhere).</td></tr>
+      <tr><td><b>Accuracy</b></td><td>Measurable, deploy-gated; no silent wrong answers</td><td>Gold-set eval gates deploy (field F1, schema-valid rate, reconcile-flag rate). At runtime, schema + arithmetic reconciliation; anything uncertain → human.</td></tr>
+    </table>
+
+    <h2>② The block diagram — data flow (minute 2–6)</h2>
+    <p>No black boxes — name the framework at each stage.</p>
+    <div class="mermaid">
+flowchart LR
+  C["Client / UI"] -->|"POST /api/ingest (PDF)"| API["FastAPI on Databricks Apps"]:::n
+  API -->|"split (PyMuPDF)"| PRE["Preprocess: splitter → 1 doc/page;<br/>loader: text-layer printable-ratio check"]:::n
+  API -->|"202 + job_id"| C
+  PRE -->|"text or page-image"| INF["Inference: DSPy typed signature →<br/>Databricks FM serving endpoint (gemma-3-12b VLM)"]:::llm
+  INF --> VAL["Validate: Pydantic schema (ⓐ)<br/>+ line-items↔total reconcile"]:::dec
+  VAL -->|"ok"| ST[("Delta: jobs + audit_events<br/>UC Volume: raw PDF")]:::d
+  VAL -->|"inconsistent → escalate → human"| H["🚩 human review"]:::err
+  ST -->|"GET /api/jobs/{id} (poll)"| C
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
+  classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+  classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
+    </div>
+    <table>
+      <tr><th>Stage</th><th>What runs</th><th>Note / bottleneck</th></tr>
+      <tr><td>Ingestion</td><td>FastAPI on Databricks Apps; <code>/api/ingest</code> splits multi-invoice PDFs</td><td>Bottleneck is intentionally <i>not</i> here — it returns 202 instantly; upload size only.</td></tr>
+      <tr><td>Preprocess</td><td>PyMuPDF: split, then text-layer check (printable-ratio) → text or render-to-PNG</td><td>Deterministic, cheap, no GPU, no OCR binary. Decides text-vs-vision.</td></tr>
+      <tr><td>Inference</td><td>DSPy <code>Predict</code> over a typed signature → Databricks Foundation Model serving endpoint</td><td><b>The real latency + cost center.</b> Cascade tier-1 → tier-2. One-line model swap.</td></tr>
+      <tr><td>Caching</td><td>Idempotent job ids; (DSPy LM cache off for fresh reads); embeddings precomputed for future search</td><td>Identical resubmissions can be served from the store; embeddings cached at ingest so future Q&A is a lookup.</td></tr>
+      <tr><td>Storage</td><td>Delta tables (jobs, audit_events) + UC Volume (raw PDF), via the SQL Statement Execution + Files APIs</td><td>Append-friendly; <b>job-status hot-row updates are the scale risk</b> (see debt).</td></tr>
+    </table>
+
+    <h2>③ AI lifecycle component (minute 2–6)</h2>
+    <ul>
+      <li><b>Model type — VLM/LLM, not XGBoost.</b> This is open-vocabulary structured extraction from arbitrary layouts and <i>images</i>, not fixed-feature tabular prediction — there are no engineered features to boost over. A VLM reads layout directly; a classical model can't ingest a scanned receipt.</li>
+      <li><b>Why a cascade (FrugalGPT), not one big model.</b> Fast model on the easy bulk, premium only on the hard tail — the cost + latency story, backed by the paper (≈98% cheaper to match a top model).</li>
+      <li><b>Training vs inference sync.</b> We <b>don't train a model</b> — inference-only against hosted FMs, so there's no train/serve skew. What we "train" is the <i>prompt</i>: <b>GEPA</b> compiles the DSPy signature against an eval metric, later, from accumulated examples.</li>
+      <li><b>Vector DB / RAG — deferred, designed-for.</b> Future Q&A is RAG: page-chunk embeddings (bge/gte) in Databricks Vector Search, tagged with client/date/party for filtered retrieval. Not built in the POC, but the storage choices today make it an add-on, not a rewrite.</li>
+    </ul>
+
+    <h2>④ Edge cases &amp; failure modes (minute 6–8)</h2>
+    <table>
+      <tr><th>Failure</th><th>Detect</th><th>Mitigate → final step</th></tr>
+      <tr><td><b>ⓐ Output won't fit schema</b></td><td>DSPy coerces to the Pydantic <code>Invoice</code>; raises <code>AdapterParseError</code></td><td>Re-ask once → escalate to premium → still bad: job <code>FAILED</code> (quarantined). Never a malformed row.</td></tr>
+      <tr><td><b>ⓑ Image-only / no text layer</b></td><td>Text-layer printable-ratio check (catches empty <i>and</i> garbled/encoded fonts)</td><td>Render page → vision model. No OCR binary; VLM beats OCR on degraded scans.</td></tr>
+      <tr><td><b>ⓒ Transient API error</b></td><td><code>openai</code> timeout/conn/429/5xx types</td><td>Exponential-backoff retry; deterministic errors are <i>not</i> retried (escalate instead).</td></tr>
+      <tr><td><b>＋ Well-typed but wrong</b></td><td>Arithmetic: line items must sum to total (the real Uber misread)</td><td>Escalate → still inconsistent: <b>flag for human review</b>. Schema-valid ≠ correct.</td></tr>
+    </table>
+    <div class="callout"><strong>The line to land:</strong> the final step is always a human, and every decision is on the audit trail. A flagged uncertainty is safe for a legal client; a silent fabrication is not.</div>
+
+    <h2>⑤ Day-2 operations (minute 6–8)</h2>
+    <table>
+      <tr><th>Concern</th><th>How it's handled</th></tr>
+      <tr><td><b>Monitoring</b></td><td><code>mlflow.dspy.autolog()</code> traces every model call (input → rendered prompt → output → tokens → latency) to a workspace experiment. Ops metrics: schema-valid rate, reconcile-flag rate, escalation rate, p50/p95 latency, cost/doc.</td></tr>
+      <tr><td><b>Drift detection</b></td><td>Fixed gold set re-scored each release in MLflow; watch field-F1 and flag-rate over time. Rising flag-rate on a vendor = distribution shift; those docs feed the gold set.</td></tr>
+      <tr><td><b>Fallback (AI fails)</b></td><td>The cascade itself: tier-1 → tier-2 → human. Transient retries; schema + reconcile gates. Job state in Delta (not memory) survives a worker/app restart.</td></tr>
+      <tr><td><b>Logging / audit</b></td><td>Two layers: append-only <code>audit_events</code> (business state changes) + MLflow traces (model calls). Delta <code>DESCRIBE HISTORY</code> + Unity Catalog lineage/access give who/what/when for free.</td></tr>
+    </table>
+
+    <h2>Defend the trade-offs (be ready for "why this, not X?")</h2>
+    <table>
+      <tr><th>Choice</th><th>Over</th><th>Why</th></tr>
+      <tr><td><b>DSPy typed signature</b></td><td>raw prompt strings / LangChain</td><td>The signature <i>is</i> the model interface and the validation contract in one object — the brief's exact separation ask — and it unlocks GEPA optimization. Lighter and more typed than LangChain.</td></tr>
+      <tr><td><b>Text-layer check → VLM</b></td><td>OCR-first (Tesseract)</td><td>No system binary; OCR is lossy on seals/low-contrast/odd fonts (the hallucination paper); clean PDFs skip the model entirely.</td></tr>
+      <tr><td><b>Databricks platform</b></td><td>DIY (S3 + a model API + a logging stack)</td><td>Audit is <b>configured, not built</b> (Delta history, UC lineage, MLflow); App + serving + Workflows + governance in one perimeter; bundle promotes dev→prod.</td></tr>
+      <tr><td><b>Delta for results/audit</b></td><td>a single transactional DB for everything</td><td>Delta is ideal for append-only audit + history; for hot job-status polling it isn't — so that moves to a transactional store at scale (named debt).</td></tr>
+      <tr><td><b>Bound-parameter SQL</b></td><td>string interpolation</td><td>Correct for JSON with embedded newlines (a real bug we hit) and injection-safe.</td></tr>
+      <tr><td><b>Split upstream</b></td><td>loop pages inside the extractor</td><td>Keeps the service contract clean (1 doc = 1 invoice); each invoice gets its own audit trail + retained file.</td></tr>
+    </table>
+
+    <h2>Acknowledge the technical debt (name it before they do)</h2>
+    <ol style="line-height:1.85;font-size:14px">
+      <li><b>Open-weight accuracy on Free Edition.</b> <code>gemma-3-12b</code> misreads dense receipts (the Uber total). Mitigation in place: reconciliation catches it and flags for review; production swaps tier-2 to vision-capable <code>claude-opus-4-8</code>. <i>This is the weakest point — I'd lead with it.</i></li>
+      <li><b>Vision escalation is a no-op on Free Edition</b> — tier-2 (<code>llama-3-3-70b</code>) is text-only, so a scan can't be re-read; it goes straight to human. Real escalation needs the paid workspace's vision premium model.</li>
+      <li><b>Job-status in Delta won't survive high poll volume</b> (hot-row updates). Move status to a transactional store (e.g. Lakebase) behind the same <code>JobStore</code> interface; Delta keeps results + audit.</li>
+      <li><b>Thresholds are hand-tuned</b> (text-layer ratio 0.6, reconcile tolerance, confidence gate) — guesses until we have data; GEPA + the eval loop tune them on the firm's real invoices.</li>
+      <li><b>Reconciliation only catches arithmetic inconsistency</b> — a wrong-but-consistent value (e.g. a one-character invoice-number OCR slip) isn't caught; that's what the premium model + human review are for.</li>
+      <li><b>Single-type in code</b> (invoice). Multi-format ingestion + classification are platform-design only, not built.</li>
+      <li><b>Confidentiality/PII not implemented</b> — redaction-before-model and model-placement (in-perimeter vs cross-geo) are flagged open, for the firm's experts.</li>
+    </ol>
+
+    <h2>The improvement story (if asked "how does it get better?")</h2>
+    <p>The failures we log <i>are</i> the training signal. Human-flagged cases (schema fails, reconcile mismatches, corrections) accumulate into a gold set, then <b>GEPA</b> (Genetic-Pareto — the current DSPy optimizer, ICLR 2026) evolves the prompt by <b>reflecting on that rich textual feedback</b>, not just a scalar score — from as few as ~10 examples (vs MIPROv2's 200+). Same loop tunes every threshold. So it improves on <i>this firm's</i> documents, measured in MLflow, not anecdotally.</p>
+
+    <h2>Q&A buffer — likely questions, crisp answers</h2>
+    <div class="qa">
+      <p><b>Why DSPy over plain prompting / LangChain?</b> Typed signature = interface + validation in one; one-line model/tier swap; GEPA optimization path. Less glue than LangChain.</p>
+      <p><b>Why not fine-tune a model?</b> No labelled data on day one, and inference-only avoids train/serve skew + GPU serving cost. We optimize the <i>prompt</i> (GEPA) once data accrues; a fine-tuned Qwen2.5-VL is a later production-tier candidate.</p>
+      <p><b>How do you know an extraction is right?</b> Two gates — schema (well-typed) and arithmetic reconciliation (well-formed). Neither proves semantic truth, so uncertain results escalate then go to a human; correctness is measured on the gold set.</p>
+      <p><b>How does it scale?</b> Async decouples API latency from extraction; workers fan out via Workflows; endpoints move to provisioned throughput; job-status moves to a transactional store. No rewrite — levers per stage.</p>
+      <p><b>Where's the audit trail?</b> Append-only <code>audit_events</code> + MLflow traces + Delta history + UC lineage/access — mostly configured, not built. That's the main reason for Databricks.</p>
+      <p><b>What breaks first under load?</b> Job-status polling against Delta. Fix is the transactional store; everything else (workers, endpoints) scales horizontally.</p>
+    </div>
+
+    <div class="pagenav">
+      <a href="slides.html">▣ The Two Slides</a>
+      <a href="index.html">⌂ Overview</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
