@@ -43,7 +43,7 @@ flowchart LR
   R --> M["📊 Score<br/>accuracy · schema · hallucination · latency · cost"]
   M --> GATE{"meets the bar?"}
   GATE -->|yes| DEP["🚀 Deploy"]
-  GATE -->|"no"| FIX["🔧 Tune thresholds ·<br/>DSPy-optimize prompts"]
+  GATE -->|"no"| FIX["🔧 Tune thresholds ·<br/>GEPA-optimize prompts"]
   FIX --> R
   DEP --> PROD["🏢 Real documents"]
   PROD --> ESC["🚩 Flagged for review<br/>+ human-fixed"]
@@ -55,17 +55,18 @@ flowchart LR
     <p>The labelled data we accumulate is the key that turns on the levers we deliberately left off at the start:</p>
     <ul style="color:#c4cdd8;line-height:1.8;font-size:14px">
       <li><b>Tuned thresholds, from the invoices we actually see</b> — the cut-offs we set by hand today become data-driven: the escalate-vs-accept confidence threshold, the classifier's confidence gate, the text-layer printable-ratio, and the reconciliation tolerance — all tuned to the firm's real document mix instead of guessed (cascade thresholds <i>learned</i>, exactly as FrugalGPT does it).<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[2]</a></sup></li>
-      <li><b>DSPy prompt optimization</b> — once enough reviewed examples exist, DSPy's optimizer (e.g. <code>MIPROv2</code> / <code>BootstrapFewShot</code>) <i>compiles</i> the extraction signature against the eval metric — auto-generating better instructions and few-shot examples from our own data. This is the headline DSPy lever we deliberately deferred: no examples on day one, so we ship the hand-written prompt; the eval loop is what turns optimization on later.<sup class="src"><a href="https://dspy.ai/learn/optimization/optimizers/" target="_blank">[3]</a></sup></li>
+      <li><b>DSPy prompt optimization with <code>GEPA</code></b> — once reviewed examples exist, GEPA (Genetic-Pareto, the current DSPy optimizer<sup class="src"><a href="https://arxiv.org/abs/2507.19457" target="_blank">[3]</a></sup>) <i>compiles</i> the extraction signature against our eval metric. It's a strong fit here: rather than only a scalar score, GEPA <b>reflects on rich textual feedback</b> — our schema errors, reconciliation mismatches, and human corrections — to evolve a better prompt, and it works from <b>~10 examples</b> (vs MIPROv2's 200+) with far fewer evaluations. So the very signals our failure handling already produces become the optimizer's input. We deferred this on day one (no data yet) and ship the hand-written prompt; the eval loop turns it on later.<sup class="src"><a href="https://dspy.ai/api/optimizers/GEPA/overview/" target="_blank">[4]</a></sup></li>
       <li><b>Optimizing the rule classifier</b> — the labelled docs let us tune the keyword weights and confidence gate, then climb from rules → a trained classifier as volume grows (see <a href="classification.html">④</a>).</li>
     </ul>
-    <div class="callout"><strong>The plan, in one line:</strong> ship hand-tuned today (no data yet), then let the <b>human-flagged cases</b> accumulate and use them to <b>DSPy-optimize the prompts and tune every threshold</b> to the invoices the system actually sees. We don't guess the thresholds up front — we earn them from real data.</div>
+    <div class="callout"><strong>The plan, in one line:</strong> ship hand-tuned today (no data yet), then let the <b>human-flagged cases</b> accumulate and use them to <b>optimize the prompts with GEPA and tune every threshold</b> to the invoices the system actually sees. GEPA evolves the prompt by reflecting on the exact failures we log, so we don't guess thresholds or prompts up front — we earn them from real data.</div>
 
     <div class="callout win"><strong>Why it matters:</strong> a proof-of-concept is a hypothesis, not a delivery. The evaluation harness turns every claim in this documentation — accuracy, hallucination-resistance, latency — into a measured number, and the feedback loop is the concrete answer to how the system improves once it is live.</div>
 
     <div class="sources"><b>Sources</b><ol>
       <li>[1] KIE-HVQA — invoices with simulated degradation + reliability labels. <a href="https://huggingface.co/datasets/bytedance-research/KIE-HVQA" target="_blank">huggingface.co</a></li>
       <li>[2] Chen et al., <i>FrugalGPT</i>, arXiv 2305.05176 — cascade thresholds learned from a training set. <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
-      <li>[3] DSPy optimizers — compile prompts/weights against an eval metric. <a href="https://dspy.ai/learn/optimization/optimizers/" target="_blank">dspy.ai</a></li>
+      <li>[3] Agrawal et al., <i>GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning</i>, arXiv 2507.19457 (ICLR 2026) — reflective, feedback-driven prompt evolution; outperforms MIPROv2 by ~13% and GRPO by ~20% with up to 35× fewer rollouts, from as few as ~10 examples. <a href="https://arxiv.org/abs/2507.19457" target="_blank">arxiv.org/abs/2507.19457</a></li>
+      <li>[4] <code>dspy.GEPA</code> — reflective prompt optimizer; metric returns a score + textual feedback. <a href="https://dspy.ai/api/optimizers/GEPA/overview/" target="_blank">dspy.ai</a></li>
     </ol></div>
 
     <div class="pagenav">

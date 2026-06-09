@@ -79,6 +79,11 @@
       <p style="font-size:13px"><span class="pro">In one line:</span> <i>"DSPy makes the model's output a typed contract, so validation is built into the interface rather than bolted on."</i></p>
     </div>
     <div class="card">
+      <h3>GEPA (DSPy's optimizer)</h3>
+      <p style="font-size:13.5px">GEPA = <b>Genetic-Pareto</b>, the current DSPy prompt optimizer (Agrawal et al., 2025; ICLR 2026). Instead of just a scalar score, it <b>reflects on rich textual feedback</b> — error messages, constraint violations, failed cases — and evolves better instructions, keeping a Pareto frontier of candidates. It beats the older MIPROv2 by ~13% and needs as few as <b>~10 examples</b> (vs 200+). <b>In our plan:</b> the failures our pipeline already records (schema errors, reconciliation mismatches, human corrections) are exactly the feedback GEPA consumes — so it's the "improve on the firm's own data, later" lever, not a day-one one.<sup class="src"><a href="https://arxiv.org/abs/2507.19457" target="_blank">[GEPA]</a></sup></p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"GEPA evolves the prompt by reflecting on our logged failures — so the system improves from the cases a human had to fix."</i></p>
+    </div>
+    <div class="card">
       <h3>MLflow tracing</h3>
       <p style="font-size:13.5px">Auto-records every LLM call — input, prompt, model+version, output, tokens, latency — as a durable trace. <b>In our plan:</b> the model-audit layer (paired with the business event log), so each extraction is reproducible. DSPy emits these automatically.</p>
       <p style="font-size:13px"><span class="pro">In one line:</span> <i>"MLflow tracing captures every model call end-to-end, so each extraction is reproducible — critical for legal."</i></p>
