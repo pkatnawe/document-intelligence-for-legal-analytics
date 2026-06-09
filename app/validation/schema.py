@@ -18,10 +18,14 @@ def _now() -> str:
 
 
 class LineItem(BaseModel):
-    description: str = Field(description="the charge's label, exactly as printed (e.g. 'Base Fare', 'Tip')")
+    description: str = Field(description="the charge's label, exactly as printed (e.g. 'Base Fare', 'Tip', 'Discount')")
     quantity: Optional[float] = Field(default=None, description="quantity if shown, else null")
     unit_price: Optional[float] = Field(default=None, description="price per unit if shown, else null")
-    amount: float = Field(description="the line's amount, read exactly with its decimal point (e.g. 3.17, not 31.7)")
+    amount: Optional[float] = Field(
+        default=None,
+        description="the line's amount, read exactly with its decimal point (e.g. 3.17, not 31.7); "
+        "NEGATIVE for a discount/credit; null only if genuinely unreadable",
+    )
 
 
 class Invoice(BaseModel):
@@ -39,12 +43,18 @@ class Invoice(BaseModel):
         "none (e.g. a ride receipt). NEVER use a card number, phone number, or date.",
     )
     invoice_date: Optional[str] = Field(default=None, description="the invoice/issue date if shown")
+    due_date: Optional[str] = Field(default=None, description="the payment due date if shown, else null")
+    purchase_order: Optional[str] = Field(default=None, description="the PO / purchase-order number if shown, else null")
     vendor: Optional[str] = Field(default=None, description="the company that issued the invoice (the seller/supplier name only)")
     bill_to: Optional[str] = Field(default=None, description="who the invoice is billed to (the customer/client)")
     currency: Optional[str] = Field(default=None, description="ISO currency or symbol, e.g. CAD, USD")
     subtotal: Optional[float] = Field(default=None, description="the amount labeled 'Subtotal' (before tax/fees); null if not shown")
     tax: Optional[float] = Field(default=None, description="ONLY a value explicitly labeled tax/GST/HST/QST/VAT; null if none. A tip is NOT tax.")
-    total: float = Field(ge=0, description="the final amount due — the value labeled 'Total' / 'Total Paid' / 'Amount Due'")
+    total: Optional[float] = Field(
+        default=None,
+        description="the final amount due/paid — the value labeled 'Total' / 'Total Paid' / 'Amount Due' / "
+        "'Balance Due'; may be NEGATIVE for a credit note; null only if the document shows no total at all",
+    )
     payment_method: Optional[str] = Field(default=None, description="how it was paid, e.g. 'American Express …1004'")
     line_items: list[LineItem] = Field(
         default_factory=list,

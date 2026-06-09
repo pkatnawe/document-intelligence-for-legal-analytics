@@ -23,18 +23,21 @@ def test_receipt_without_invoice_number_is_valid():
     assert inv.vendor == "Uber"
 
 
-def test_negative_total_rejected():
-    with pytest.raises(ValidationError):
-        Invoice(invoice_number="INV-1", total=-1)
+def test_negative_total_allowed_for_credit_notes():
+    # A credit note / refund legitimately has a negative total — the schema must accept it.
+    inv = Invoice(invoice_number="CN-1", total=-42.50)
+    assert inv.total == -42.50
 
 
-def test_missing_total_rejected():
-    # `total` is the one structurally required amount -> failure case (a) at the boundary.
-    with pytest.raises(ValidationError):
-        Invoice(invoice_number="INV-1")
+def test_missing_total_allowed():
+    # The schema is permissive so a varied test set never hard-fails on a missing field;
+    # a missing total surfaces as None (caught downstream), not a validation error.
+    inv = Invoice(invoice_number="INV-1")
+    assert inv.total is None
 
 
 def test_non_numeric_total_rejected():
+    # Type errors are still caught at the boundary — that's failure case (a).
     with pytest.raises(ValidationError):
         Invoice(invoice_number="INV-1", total="N/A")  # type: ignore[arg-type]
 

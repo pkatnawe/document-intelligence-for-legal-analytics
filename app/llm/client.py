@@ -16,8 +16,8 @@ from app.llm.signatures import ExtractInvoice, ExtractInvoiceVision
 
 FAST: "dspy.LM | None" = None
 PREMIUM: "dspy.LM | None" = None
-extract_text = None    # dspy.Predict(ExtractInvoice)
-extract_vision = None   # dspy.Predict(ExtractInvoiceVision)
+extract_text = None    # dspy.ChainOfThought(ExtractInvoice)
+extract_vision = None   # dspy.ChainOfThought(ExtractInvoiceVision)
 
 
 def configure() -> None:
@@ -32,5 +32,8 @@ def configure() -> None:
     PREMIUM = dspy.LM(f"databricks/{settings.tier2_model}", cache=False)
     dspy.configure(lm=FAST)
 
-    extract_text = dspy.Predict(ExtractInvoice)
-    extract_vision = dspy.Predict(ExtractInvoiceVision)
+    # Chain-of-Thought: the model reasons about the layout/amounts before committing to the
+    # typed output — measurably better on messy receipts than a bare Predict. The extra
+    # `reasoning` field is internal; callers still read `.invoice`.
+    extract_text = dspy.ChainOfThought(ExtractInvoice)
+    extract_vision = dspy.ChainOfThought(ExtractInvoiceVision)

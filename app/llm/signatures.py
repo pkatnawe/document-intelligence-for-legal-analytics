@@ -9,34 +9,49 @@ import dspy
 
 from app.validation.schema import Invoice
 
+# One robust rule set, shared by the text and vision front-ends so they behave identically.
+# These rules are written to survive a varied test set — different vendors, layouts,
+# currencies, languages, receipts vs. formal invoices, and credit notes.
+_RULES = """Read the whole document and reason about its layout before answering.
+
+AMOUNTS
+- Transcribe every monetary value EXACTLY as printed, keeping its decimal point (3.17 is
+  3.17, never 31.7). Use a '.' decimal separator; drop thousands separators and currency
+  symbols from numeric fields (put the currency code/symbol in `currency`).
+- `total` is the FINAL amount due or paid — the value labeled Total / Total Paid / Amount
+  Due / Balance Due / Grand Total. `subtotal` is the amount labeled Subtotal (before
+  tax/fees). NEVER swap them. If several totals appear (per page, running), use the final
+  grand total. On a credit note / refund, `total` may be NEGATIVE.
+- `tax` is ONLY a value explicitly labeled tax / GST / HST / QST / VAT / sales tax. A tip,
+  gratuity, or service fee is NOT tax. If there are multiple tax lines, sum them into `tax`
+  AND list each as a line item.
+
+LINE ITEMS
+- Put EVERY charge row in `line_items`, each read exactly: fares, fees, taxes, tips,
+  surcharges, subscription lines, shipping, and discounts. A discount or credit is a
+  NEGATIVE amount.
+
+IDENTITY & DATES
+- `vendor` is the seller/supplier that ISSUED the invoice; `bill_to` is the customer being
+  charged. Do not confuse them.
+- Transcribe dates as printed.
+
+HONESTY
+- Only fill a field the document actually shows. If a field is absent, return null — NEVER
+  substitute a card number, phone number, date, or address for an invoice number, and never
+  invent a value. When unsure, prefer null over a guess.
+"""
+
 
 class ExtractInvoice(dspy.Signature):
-    """Extract structured invoice data (header + line items) from raw document text.
-
-    Transcribe values exactly as printed — keep the decimal point (3.17 is 3.17, never 31.7).
-    `total` is the amount labeled Total / Total Paid / Amount Due; `subtotal` is the amount
-    labeled Subtotal — never swap them. `tax` is only a value labeled tax / GST / HST / QST /
-    VAT — a tip is NOT tax. Put every charge row (fares, fees, taxes, tips, subscription
-    lines) in `line_items`. Only fill a field the document actually shows: if there is no
-    invoice number (e.g. a ride receipt), return null — never substitute a card number,
-    phone number, or date.
-    """
+    __doc__ = "Extract structured invoice data (header + line items) from raw document text.\n\n" + _RULES
 
     document_text: str = dspy.InputField(desc="raw text extracted from the PDF")
     invoice: Invoice = dspy.OutputField(desc="the structured invoice")
 
 
 class ExtractInvoiceVision(dspy.Signature):
-    """Extract structured invoice data (header + line items) from a scanned invoice image.
-
-    Transcribe values exactly as printed — keep the decimal point (3.17 is 3.17, never 31.7).
-    `total` is the amount labeled Total / Total Paid / Amount Due; `subtotal` is the amount
-    labeled Subtotal — never swap them. `tax` is only a value labeled tax / GST / HST / QST /
-    VAT — a tip is NOT tax. Put every charge row (fares, fees, taxes, tips, subscription
-    lines) in `line_items`. Only fill a field the document actually shows: if there is no
-    invoice number (e.g. a ride receipt), return null — never substitute a card number,
-    phone number, or date.
-    """
+    __doc__ = "Extract structured invoice data (header + line items) from a scanned invoice image.\n\n" + _RULES
 
     page_image: dspy.Image = dspy.InputField(desc="rendered page image of a scanned / image-only invoice")
     invoice: Invoice = dspy.OutputField(desc="the structured invoice")

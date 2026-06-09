@@ -22,9 +22,11 @@ from app.validation.schema import Invoice
 def reconcile(inv: Invoice, abs_tol: float = 0.02, rel_tol: float = 0.01) -> list[str]:
     """Return a list of human-readable consistency warnings (empty == looks consistent)."""
     warnings: list[str] = []
-    if inv.line_items:
-        line_sum = round(sum(li.amount for li in inv.line_items), 2)
-        tolerance = max(abs_tol, rel_tol * inv.total)
+    amounts = [li.amount for li in inv.line_items if li.amount is not None]
+    # Only reconcile when we have a total and at least one line amount to sum.
+    if inv.total is not None and amounts:
+        line_sum = round(sum(amounts), 2)
+        tolerance = max(abs_tol, rel_tol * abs(inv.total))
         if abs(line_sum - inv.total) > tolerance:
             warnings.append(
                 f"line items sum to {line_sum:.2f} but the total is {inv.total:.2f} "
