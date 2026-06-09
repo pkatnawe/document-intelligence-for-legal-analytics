@@ -103,6 +103,8 @@ UPLOAD_PAGE = """<!DOCTYPE html>
   .prov { margin-top:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px;
           color:var(--mut); word-break:break-all; }
   .err { color:var(--err); font-size:13px; padding:0 16px 14px; }
+  .review { background:rgba(210,153,34,.14); color:#e3b341; border:1px solid rgba(210,153,34,.4);
+            border-radius:8px; padding:9px 11px; margin-bottom:12px; font-size:13px; font-weight:500; }
 </style>
 </head>
 <body>
@@ -246,7 +248,11 @@ function render(el, job) {
     ['Bill to', inv.bill_to], ['Subtotal', money(inv.subtotal)], ['Tax', money(inv.tax)],
     ['Payment', inv.payment_method],
   ].filter(([,v]) => v != null && v !== '');
-  let html = '<div class="body"><table>';
+  let html = '<div class="body">';
+  if ((job.warnings || []).length) {
+    html += `<div class="review">⚠ Needs review — ${job.warnings.map(esc).join('; ')}</div>`;
+  }
+  html += '<table>';
   html += rows.map(([k,v]) => `<tr><td class="k">${k}</td><td class="v">${esc(String(v))}</td></tr>`).join('');
   html += `<tr class="total"><td class="k">Total</td><td class="v">${esc(money(inv.total) || '—')}</td></tr></table>`;
   const items = inv.line_items || [];

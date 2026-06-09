@@ -61,6 +61,7 @@ app/
 │
 │  ── ③ OUTPUT VALIDATION ──  (pure Pydantic; no model, no I/O)
 ├─ validation/schema.py    # the Invoice contract — the single source of truth
+├─ validation/reconcile.py # correctness check: line items must sum to the total
 │
 │  ── orchestration + platform (wire the three together; don't mix them) ──
 ├─ extract.py              # the cascade + the three failure paths (a/b/c)

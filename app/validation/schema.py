@@ -18,10 +18,10 @@ def _now() -> str:
 
 
 class LineItem(BaseModel):
-    description: str
-    quantity: Optional[float] = None
-    unit_price: Optional[float] = None
-    amount: float
+    description: str = Field(description="the charge's label, exactly as printed (e.g. 'Base Fare', 'Tip')")
+    quantity: Optional[float] = Field(default=None, description="quantity if shown, else null")
+    unit_price: Optional[float] = Field(default=None, description="price per unit if shown, else null")
+    amount: float = Field(description="the line's amount, read exactly with its decimal point (e.g. 3.17, not 31.7)")
 
 
 class Invoice(BaseModel):
@@ -33,16 +33,23 @@ class Invoice(BaseModel):
     receipt (payment method, zero tax) — so only `total` is structurally required; the
     rest are optional. `vendor`/`bill_to` are the "involved parties" the brief calls out.
     """
-    invoice_number: Optional[str] = None   # ride receipts (Uber) have none
-    invoice_date: Optional[str] = None
-    vendor: Optional[str] = None           # who issued it (involved party)
-    bill_to: Optional[str] = None          # the client (involved party)
-    currency: Optional[str] = None
-    subtotal: Optional[float] = None       # amount before tax, when stated
-    tax: Optional[float] = None            # total tax (GST/QST/VAT…), when stated
-    total: float = Field(ge=0)             # the one amount every invoice has
-    payment_method: Optional[str] = None   # e.g. "American Express …1004"
-    line_items: list[LineItem] = Field(default_factory=list)
+    invoice_number: Optional[str] = Field(
+        default=None,
+        description="the invoice/receipt number if one is explicitly shown; null if there is "
+        "none (e.g. a ride receipt). NEVER use a card number, phone number, or date.",
+    )
+    invoice_date: Optional[str] = Field(default=None, description="the invoice/issue date if shown")
+    vendor: Optional[str] = Field(default=None, description="the company that issued the invoice (the seller/supplier name only)")
+    bill_to: Optional[str] = Field(default=None, description="who the invoice is billed to (the customer/client)")
+    currency: Optional[str] = Field(default=None, description="ISO currency or symbol, e.g. CAD, USD")
+    subtotal: Optional[float] = Field(default=None, description="the amount labeled 'Subtotal' (before tax/fees); null if not shown")
+    tax: Optional[float] = Field(default=None, description="ONLY a value explicitly labeled tax/GST/HST/QST/VAT; null if none. A tip is NOT tax.")
+    total: float = Field(ge=0, description="the final amount due — the value labeled 'Total' / 'Total Paid' / 'Amount Due'")
+    payment_method: Optional[str] = Field(default=None, description="how it was paid, e.g. 'American Express …1004'")
+    line_items: list[LineItem] = Field(
+        default_factory=list,
+        description="every individual charge row (fares, fees, taxes, tips, subscription lines), each read exactly",
+    )
 
 
 class JobStatus(str, Enum):
@@ -63,4 +70,5 @@ class Job(BaseModel):
     source_path: Optional[str] = None  # UC Volume path of the retained raw PDF
     tier_used: Optional[str] = None
     result: Optional[Invoice] = None   # one document = one invoice
+    warnings: list[str] = Field(default_factory=list)  # consistency flags → needs human review
     error: Optional[str] = None

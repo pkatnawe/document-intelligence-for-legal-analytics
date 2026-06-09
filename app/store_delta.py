@@ -21,6 +21,7 @@ would move to a transactional store while Delta keeps the append-only audit + re
 from __future__ import annotations
 
 import io
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -70,7 +71,7 @@ class DeltaJobStore:
             f"""CREATE TABLE IF NOT EXISTS {self.jobs}(
                   id STRING, status STRING, filename STRING, created_at STRING, updated_at STRING,
                   was_scan BOOLEAN, source_path STRING, tier_used STRING,
-                  result_json STRING, error STRING) USING DELTA"""
+                  result_json STRING, warnings_json STRING, error STRING) USING DELTA"""
         )
         self._exec(
             f"""CREATE TABLE IF NOT EXISTS {self.audit}(
@@ -114,7 +115,7 @@ class DeltaJobStore:
     def get(self, job_id: str) -> Optional[Job]:
         rows = self._exec(
             "SELECT id,status,filename,created_at,updated_at,was_scan,source_path,tier_used,"
-            f"result_json,error FROM {self.jobs} WHERE id=:id",
+            f"result_json,warnings_json,error FROM {self.jobs} WHERE id=:id",
             params={"id": job_id}, fetch=True,
         )
         if not rows:
@@ -123,7 +124,8 @@ class DeltaJobStore:
         result = Invoice.model_validate_json(r[8]) if r[8] else None
         return Job(
             id=r[0], status=JobStatus(r[1]), filename=r[2], created_at=r[3], updated_at=r[4],
-            was_scan=_as_bool(r[5]), source_path=r[6], tier_used=r[7], result=result, error=r[9],
+            was_scan=_as_bool(r[5]), source_path=r[6], tier_used=r[7], result=result,
+            warnings=json.loads(r[9]) if r[9] else [], error=r[10],
         )
 
     def update(self, job_id: str, **fields) -> None:
@@ -133,6 +135,8 @@ class DeltaJobStore:
                 value = value.value
             elif key == "result" and isinstance(value, Invoice):
                 key, value = "result_json", value.model_dump_json()
+            elif key == "warnings":
+                key, value = "warnings_json", json.dumps(value)
             sets[key] = value
         assignments = ",".join(f"{k}=:{k}" for k in sets)
         self._exec(

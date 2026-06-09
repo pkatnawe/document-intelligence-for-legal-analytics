@@ -62,6 +62,23 @@ def test_any_failure_is_recorded_never_silent(text_pdf, monkeypatch):
     assert "FAILED" in _stages(store, job.id)
 
 
+def test_inconsistent_extraction_is_flagged_not_silently_succeeded(text_pdf, monkeypatch):
+    from app.validation.schema import LineItem
+    # a well-typed but wrong result: line items (130) don't reconcile with total (53)
+    bad = Invoice(invoice_number="X", total=53.43,
+                  line_items=[LineItem(description="a", amount=64.46), LineItem(description="b", amount=65.54)])
+    monkeypatch.setattr(extract, "run_extraction", lambda **kw: (bad, "tier1-model"))
+    store = InMemoryJobStore()
+    job = store.create("invoice.pdf")
+
+    extract.process_job(store, job.id, text_pdf)
+
+    got = store.get(job.id)
+    assert got.status == JobStatus.SUCCEEDED          # data is kept...
+    assert got.warnings                               # ...but flagged for review (not silent)
+    assert "FLAGGED_FOR_REVIEW" in _stages(store, job.id)
+
+
 def test_transient_errors_retry_but_deterministic_do_not():
     # transient -> retried up to max_attempts; deterministic -> not retried
     if not extract.TRANSIENT_ERRORS:

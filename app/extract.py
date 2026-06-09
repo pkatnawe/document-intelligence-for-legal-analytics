@@ -17,6 +17,7 @@ from app.documents.loader import load_pdf, png_to_data_uri
 from app.llm import client
 from app.observability import get_logger
 from app.store import JobStore
+from app.validation.reconcile import reconcile
 from app.validation.schema import Invoice, JobStatus
 
 log = get_logger(__name__)
@@ -58,17 +59,19 @@ def _predict(predictor, **inputs) -> Invoice:
     return _call()
 
 
-def run_extraction(*, text: str | None = None, image_uri: str | None = None) -> tuple[Invoice, str]:
-    """Run the cascade: tier-1 fast model, escalating to tier-2 on a schema-parse failure.
-
-    Returns (invoice, tier_used). A parse failure on the premium model propagates to the
-    caller, which quarantines the job.
-    """
+def run_extraction(*, text: str | None = None, image_uri: str | None = None,
+                    premium: bool = False) -> tuple[Invoice, str]:
+    """Run extraction. Tier-1 fast model by default, escalating to tier-2 on a schema-parse
+    failure. `premium=True` forces the tier-2 model directly (used when a tier-1 result is
+    internally inconsistent — see process_job). Returns (invoice, tier_used)."""
     if image_uri is not None:
         predictor, inputs = client.extract_vision, {"page_image": dspy.Image(url=image_uri)}
     else:
         predictor, inputs = client.extract_text, {"document_text": text or ""}
 
+    if premium:
+        with dspy.context(lm=client.PREMIUM):
+            return _predict(predictor, **inputs), settings.tier2_model
     try:
         return _predict(predictor, **inputs), settings.tier1_model
     except PARSE_ERRORS as exc:  # (a) escalate for quality
@@ -94,20 +97,41 @@ def process_job(store: JobStore, job_id: str, data: bytes) -> None:
 
         if doc.has_text:
             store.append_audit(job_id, "READ", "text layer found -> text model")
-            invoice, tier = run_extraction(text=doc.text)
+            inputs = {"text": doc.text}
         else:  # (b) image-only scan / corrupt text layer
             n = len(doc.page_images_png)
             store.append_audit(job_id, "READ", f"no usable text; {n} page(s) -> vision model")
             if not doc.page_images_png:
                 raise ValueError("scanned PDF produced no renderable pages")
-            invoice, tier = run_extraction(image_uri=png_to_data_uri(doc.page_images_png[0]))
+            inputs = {"image_uri": png_to_data_uri(doc.page_images_png[0])}
 
-        store.update(job_id, status=JobStatus.SUCCEEDED, result=invoice, tier_used=tier)
+        invoice, tier = run_extraction(**inputs)
+
+        # Correctness check beyond the schema: a well-typed result can still be factually
+        # wrong (a weak model misreading amounts). If the line items don't reconcile with the
+        # total, escalate to the premium tier; if it still won't reconcile, flag the job for
+        # review rather than storing a confident wrong answer (never a silent failure).
+        warnings = reconcile(invoice)
+        if warnings:
+            store.append_audit(job_id, "RECONCILE_WARNING", f"{warnings[0]}; escalating to {settings.tier2_model}")
+            try:
+                inv2, tier2 = run_extraction(**inputs, premium=True)
+                if not reconcile(inv2):
+                    invoice, tier, warnings = inv2, tier2, []
+                    store.append_audit(job_id, "ESCALATED", f"premium ({tier2}) reconciled")
+            except Exception as exc:  # e.g. a text-only premium tier can't read an image (Free Edition)
+                store.append_audit(job_id, "ESCALATION_UNAVAILABLE", f"premium tier could not re-read: {exc}")
+
+        store.update(job_id, status=JobStatus.SUCCEEDED, result=invoice, tier_used=tier, warnings=warnings)
+        if warnings:
+            store.append_audit(job_id, "FLAGGED_FOR_REVIEW", warnings[0])
+            log.warning("job_flagged_for_review", job_id=job_id, warnings=warnings)
         store.append_audit(
             job_id, "SUCCEEDED",
-            f"{invoice.invoice_number or '(no number)'} {invoice.currency or ''} {invoice.total} via {tier}",
+            f"{invoice.invoice_number or '(no number)'} {invoice.currency or ''} {invoice.total} via {tier}"
+            + (" [needs review]" if warnings else ""),
         )
-        log.info("job_succeeded", job_id=job_id, tier=tier)
+        log.info("job_succeeded", job_id=job_id, tier=tier, flagged=bool(warnings))
 
     except PARSE_ERRORS as exc:  # (a) still invalid after escalation -> quarantine
         store.update(job_id, status=JobStatus.FAILED, error=f"schema validation failed after escalation: {exc}")
