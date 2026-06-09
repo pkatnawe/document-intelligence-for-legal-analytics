@@ -11,11 +11,13 @@ working docs under [`docs/`](docs/) (open [`docs/index.html`](docs/index.html)).
 ## What it does
 
 1. **Upload UI + async API.** A small web page (served at `/`) and `POST /api/ingest` accept
-   a PDF and return **job ids immediately** (HTTP 202) — one per invoice, since a file may
-   hold several (the splitter runs at ingestion). Extraction runs on a background worker, so
+   a PDF and return **job ids immediately** (HTTP 202, ~0.5s) — one per invoice, since a file
+   may hold several (the splitter runs at ingestion). Extraction runs on a background worker, so
    user-facing latency is the upload time, not the model time. `GET /api/jobs/{id}` is polled
-   for each result, and `GET /api/jobs/{id}/audit` returns the trail. (`POST /api/extract`
-   handles a single already-split invoice — used by the CLI.)
+   for each result, and `GET /api/jobs/{id}/audit` returns the trail. Polls are served from an
+   **in-memory cache** (sub-millisecond, no database round-trip), so the UI updates live and a
+   job's result appears in **~3–4s end-to-end**. (`POST /api/extract` handles a single
+   already-split invoice — used by the CLI.)
 2. **Read the document.** Digital PDFs use their text layer; **image-only scans — or a
    corrupt/encoded text layer (common in the real world)** — are rendered to a page image and
    sent to a vision model.
@@ -72,7 +74,7 @@ app/
 app.py / app.yaml / databricks.yml   # entry point · Apps runtime config · Asset Bundle
 scripts/ingest_dataset.py  # split the case PDF + drive the API end-to-end
 scripts/smoke_test.py      # 60-second check that a serving endpoint is reachable
-tests/                     # schema · store · splitter · loader · orchestration (20 tests)
+tests/                     # schema · store · cache · splitter · loader · orchestration (28 tests)
 ```
 
 ### How the separation actually holds
@@ -112,6 +114,29 @@ The brief's other two Task-2 asks are covered the same structural way:
   event** (`RECEIVED → RUNNING → STORED → READ → SUCCEEDED/FAILED`) to Delta — so "what
   happened to this document" is a query, not a grep.
 
+## Performance — why the UI is fast (and how it scales)
+
+The slow parts of a real document pipeline — the model call and the durable writes to a
+serverless SQL warehouse — are kept **off the user-facing path**:
+
+- **Submit returns in ~0.5s.** `POST /api/ingest` only splits the PDF and hands work to a
+  background worker; it does no database I/O.
+- **The UI reads from an in-memory write-behind cache.** Live job status + the audit trail
+  live in memory, so polling is a sub-millisecond in-process lookup — never a warehouse query,
+  never a cold-start, no "not found" gap while a row is being written. A full job shows
+  **SUCCEEDED in ~3–4s**.
+- **Durable persistence happens once, at the end.** When a job finishes, a single `flush()`
+  writes the final row to Delta, the audit trail to `audit_events`, and the raw PDF to the UC
+  Volume — in the background. The result the user sees is already final; storage just catches
+  up. (See `CachingJobStore` in [`app/store.py`](app/store.py).)
+
+**Does polling scale?** For this scope, yes — each poll is an in-memory lookup, not a DB hit,
+and the work is already decoupled behind a 202. Scaling up is a **notification-layer swap, not
+a redesign**: switch browsers to **Server-Sent Events** (push status instead of pull), give API
+consumers **webhooks** (callback on completion), and move live status to a **shared store like
+Redis** so it works across multiple app replicas (the in-memory cache is per-process). Delta
+stays the durable system of record throughout.
+
 ## Run it — two ways
 
 DSPy needs Python ≥ 3.11. Everything else is in `requirements.txt`.
@@ -134,7 +159,10 @@ PYTHONPATH=. python scripts/ingest_dataset.py
 ```
 
 Even local runs call the **live** Databricks Foundation Models and write to the **same Delta
-tables + UC Volume + MLflow experiment** — no deploy needed to exercise the full flow.
+tables + UC Volume** — no deploy needed to exercise the full flow. MLflow tracing is **opt-in**
+via `MLFLOW_EXPERIMENT`: a local run (open egress) captures full traces into the experiment;
+it is left **off on the deployed Free-Edition app** because Free Edition blocks the egress
+MLflow needs (see below).
 
 ### 2. On Databricks Apps (one command each)
 
@@ -193,14 +221,24 @@ Free Edition serves — `gemma-3-12b` (vision), `meta-llama-3-3-70b-instruct` (t
 workspace the tiers swap back to Gemini/Claude — **same code, one env change** (see
 [`.env.example`](.env.example)). Model choice is config, not code. (The open-weight vision
 model is imperfect on the noisier receipts — e.g. it may miss an Uber total or read a card
-number as an invoice number — which is exactly what the premium tier is for in production.)
+number as an invoice number — which is exactly what the premium tier + the reconciliation
+check are for in production.)
+
+**MLflow tracing on Free Edition:** the model-audit layer (`mlflow.dspy.autolog`) records every
+LLM/VLM call — input, output, tokens, latency, state. Free Edition blocks the egress MLflow
+uses to upload trace data, so tracing is **off on the deployed app** (it would only add
+latency) and the demo traces are captured by a **local run** into the `Invoice-Extraction`
+experiment. On a paid workspace it runs live with no limit — uncomment `MLFLOW_EXPERIMENT` in
+[`app.yaml`](app.yaml).
 
 ## Notes & limitations (POC)
 
-- **Storage:** Delta + UC Volume is the runtime store ([`store_delta.py`](app/store_delta.py));
+- **Storage:** Delta + UC Volume is the durable store ([`store_delta.py`](app/store_delta.py));
   SQL uses **bound parameters**, not string interpolation (correct for JSON with embedded
-  newlines, and injection-safe). The `JobStore` Protocol is the swap point — at high poll
-  volume, job status moves to a transactional store while Delta keeps the append-only audit +
+  newlines, and injection-safe). It's wrapped in a **write-behind cache** ([`store.py`](app/store.py))
+  so the live UI is served from memory and the warehouse is written once per job, off the
+  request path. The `JobStore` Protocol is the swap point — across multiple replicas, live
+  status would move to a shared store (e.g. Redis) while Delta keeps the append-only audit +
   results. Unit tests run against an in-memory `JobStore` (no SQLite, no live workspace).
 - **Scope:** this service handles **PDF invoices**. Multi-format ingestion and document
   classification are platform concerns (see [`docs/`](docs/)), not built here.
