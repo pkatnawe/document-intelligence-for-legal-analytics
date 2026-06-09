@@ -40,7 +40,7 @@ resp = client.chat.completions.<span class="fn">create</span>(
   -H <span class="st">"Content-Type: application/json"</span> \
   -d <span class="st">'{"messages":[{"role":"user","content":"Reply with: ok"}]}'</span></code></pre>
     </div>
-    <div class="callout win"><strong>Already verified (2026-06-08):</strong> auth returned <code>HTTP 200</code> as <code>pkatnawe@uwo.ca</code>; the serving-endpoints and Apps and Jobs APIs all returned <code>200</code> (there's even one app already in the workspace). So the token works, the models are reachable, and the deploy target is real. <span class="tag">Token used via env var only — never written to the repo; rotate it once auth is wired since it appeared in a screenshot.</span></div>
+    <div class="callout win"><strong>Already verified (2026-06-08):</strong> auth returned <code>HTTP 200</code> as <code>pkatnawe@uwo.ca</code>; the serving-endpoints and Apps and Jobs APIs all returned <code>200</code> (there's even one app already in the workspace). So the token works, the models are reachable, and the deploy target is real. <span class="tag">The token now lives in a Databricks secret scope (injected via <code>valueFrom</code>) — never written to the repo.</span></div>
 
     <div class="callout win"><strong>End-to-end verified live (2026-06-09):</strong> the service ran against the case's own dataset on Free Edition with the Delta store in Unity Catalog. The invoice's text layer was corrupt, so it routed to the <b>vision path</b>; <code>gemma-3-12b</code> extracted it (invoice 2011981, Cargo Collective, $99 USD); the job + result + audit trail persisted to <code>workspace.invoice_poc</code> Delta tables, and <code>DESCRIBE HISTORY</code> showed the versioned who/what/when audit primitive.</div>
 
@@ -66,7 +66,17 @@ flowchart LR
   CI -->|no| STOP["🛑 Blocked — never ships"]
   CI -->|yes| CD["🚀 Auto-deploy"] --> APP["✅ Live in Databricks"]
     </div>
-    <p style="font-size:13.5px;color:var(--mut)">A <b>Databricks Asset Bundle</b> (<code>databricks.yml</code>) makes the deploy a repeatable one-liner, and the test gate means broken code never reaches the workspace. For the POC we'll deploy by hand first; this is the "here's how it productionizes" line on the slide.</p>
+    <p style="font-size:13.5px;color:var(--mut)">The test gate means broken code never reaches the workspace, and the deploy itself is one command because it's a <b>Databricks Asset Bundle</b> (below).</p>
+
+    <h2>Deployment is declarative — the Asset Bundle</h2>
+    <p><code>databricks.yml</code> is a <b>Databricks Asset Bundle</b> (recently renamed a <i>Declarative Automation Bundle</i>) — <b>infrastructure-as-code for Databricks</b>. Rather than clicking through the UI, the whole deployable unit is declared in one version-controlled file: the <b>App</b>, the <b>secret</b> that injects the token, and per-environment <b>targets</b>. The CLI reconciles the workspace to that declaration.</p>
+    <div class="grid3">
+      <div class="card"><h3>📦 One unit, three commands</h3><p style="font-size:13px"><code>bundle validate</code> checks config, <code>bundle deploy</code> creates the App + secret, <code>bundle run</code> starts it. The whole service is one declarative artifact, not a pile of manual steps.</p></div>
+      <div class="card"><h3>🔁 Promote dev→prod by a flag</h3><p style="font-size:13px">The same bundle deploys to the Free-Edition POC (<code>-t dev</code>) or a paid production workspace (<code>-t prod</code>) — only <code>workspace.host</code> changes. <i>Same code, no rewrite.</i> Prod mode also runs the app as a service principal and can gate on the Git branch.</p></div>
+      <div class="card"><h3>🔐 Secrets by reference</h3><p style="font-size:13px">The PAT lives in a Databricks <b>secret scope</b>; <code>databricks.yml</code> declares it as a resource and <code>app.yaml</code> maps it in via <code>valueFrom</code>. The value is resolved at runtime — never committed to Git.</p></div>
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)"><b>Why it's a strong answer:</b> declarative means the deploy is <b>reproducible</b> (re-running converges, doesn't double-create), <b>reviewable</b> (every infra change is a Git commit — who/what/when), and <b>reversible</b>. That's also part of the audit story: infrastructure changes are version-controlled and attributable, and production runs under a managed identity, not a personal token.</p>
+    <div class="callout win"><strong>Deployed &amp; verified (2026-06-09):</strong> the bundle deployed the FastAPI service to <b>Databricks Apps</b>; uploading the 3-invoice case dataset through the live app split it into three single-invoice jobs (Uber, WeWork, Cargo), each extracted on a Databricks-hosted vision model and persisted to Delta + the UC Volume with a full audit trail — and every model call is captured in the MLflow experiment.</div>
 
     <div class="sources"><b>Sources</b><ol>
       <li>[1] <i>Databricks-hosted foundation models</i> — Gemini global endpoint requires cross-geo routing; Claude Opus 4.8 "excels at complex extraction… document understanding," hosted within the Databricks security perimeter. <a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/supported-models" target="_blank">supported-models</a></li>

@@ -102,6 +102,34 @@
       <h3>Delta · Unity Catalog · Vector Search</h3>
       <p style="font-size:13.5px"><b>Delta</b> = the table format (transactions + time-travel history). <b>Unity Catalog</b> = governance (permissions, lineage). <b>Vector Search</b> = an index over embeddings for fast semantic lookup. <b>In our plan:</b> audit, legal confidentiality, and future Q&A respectively.</p>
     </div>
+    <div class="card">
+      <h3>Databricks Asset Bundle (DAB)</h3>
+      <p style="font-size:13.5px">Infrastructure-as-code for Databricks (recently renamed <i>Declarative Automation Bundle</i>): one version-controlled <code>databricks.yml</code> declares the resources — our <b>App</b>, its <b>secret</b>, and per-environment <b>targets</b> (dev/prod) — and the CLI reconciles the workspace to it. <b>In our plan:</b> the same bundle promotes the Free-Edition POC to a paid production workspace by changing one flag (<code>-t prod</code>); deploys are reproducible, reviewable in Git, and (in prod mode) run as a service principal.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"The whole deployment is one YAML file — promote dev→prod with a flag, no clicking, fully auditable."</i></p>
+    </div>
+    <div class="card">
+      <h3>Databricks Apps · Foundation Model APIs · serving endpoint</h3>
+      <p style="font-size:13.5px"><b>Databricks Apps</b> host our FastAPI service on serverless compute, behind workspace OAuth. <b>Foundation Model APIs</b> expose hosted LLMs/VLMs as OpenAI-compatible <b>serving endpoints</b> (pay-per-token, or provisioned throughput at scale). <b>Service principal</b> = the app's machine identity; <b>secret scope</b> = where the token lives (never in code). <b>In our plan:</b> the app, the models, the storage, and the audit all sit inside one governed platform.</p>
+    </div>
+
+    <h2>Case &amp; domain terms (from the brief)</h2>
+    <p>The vocabulary the case itself uses, in plain language.</p>
+    <div class="card">
+      <h3>Claims line of business</h3>
+      <p style="font-size:13.5px">The insurance/legal function the POC targets — processing the paperwork tied to claims (invoices, contracts, minutes, emails). <b>Why it matters:</b> it's a high-volume, document-heavy area where automation pays off fastest.</p>
+    </div>
+    <div class="card">
+      <h3>Entity extraction · metadata</h3>
+      <p style="font-size:13.5px"><b>Entities</b> are the key facts the brief names — client names, invoice amounts, dates, involved parties. <b>Metadata</b> is data about the document (type, source, dates) used to find and route it. <b>In our plan:</b> the <code>Invoice</code> schema's fields <i>are</i> the entities; storing them makes documents queryable.</p>
+    </div>
+    <div class="card">
+      <h3>Involved parties</h3>
+      <p style="font-size:13.5px">Who a document is between — for an invoice, the <b>vendor</b> (who issued it) and the <b>bill-to</b> (the client). <b>Why it matters:</b> linking documents to parties is how a claim is reconstructed across invoices, contracts, and emails.</p>
+    </div>
+    <div class="card">
+      <h3>Audit trail · downstream use</h3>
+      <p style="font-size:13.5px"><b>Audit trail</b> = a defensible record of who/what/when and how each value was produced (required because it's legal). <b>Downstream use</b> = what the stored data feeds: reporting, search, summarization, aggregation. <b>In our plan:</b> the append-only event log + Delta history answer the audit ask; Gold tables + the vector index serve the downstream ask.</p>
+    </div>
 
     <h2>Research grounding — why we took these ideas</h2>
     <p class="lead">Three papers underpin the design. We read them for the <i>main idea</i> only — this is a case study, not a reproduction — and each one maps onto a choice we'd already reasoned our way to.</p>

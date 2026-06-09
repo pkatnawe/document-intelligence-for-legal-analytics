@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Protocol
 
-from app.validation.schema import Job, JobStatus
+from app.validation.schema import Job
 
 
 def _now() -> str:

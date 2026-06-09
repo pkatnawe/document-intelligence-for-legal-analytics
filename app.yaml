@@ -22,6 +22,10 @@ env:
   - name: TIER2_MODEL
     value: "databricks-meta-llama-3-3-70b-instruct"
 
+  # MLflow experiment that receives the DSPy traces (the model-audit layer).
+  - name: MLFLOW_EXPERIMENT
+    value: "/Users/pkatnawe@uwo.ca/invoice-extraction"
+
   # Delta-backed store (Unity Catalog) via a serverless SQL warehouse.
   - name: WAREHOUSE_ID
     value: "23ebe67c53c1d192"

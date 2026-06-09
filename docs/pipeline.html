@@ -77,11 +77,16 @@ flowchart TB
   E -->|"no"| FIX["🔁 Re-ask once,<br/>then a stronger model"]:::llm --> E2{"✅ Now?"}:::dec
   E2 -->|yes| S
   E2 -->|"still no"| H["🚩 Flag for a human 📝"]:::err
+  RETRY[["ⓒ transient API error → retry with backoff<br/>(deterministic errors are NOT retried)"]]:::retry
+  C -.-> RETRY
+  D -.-> RETRY
+  FIX -.-> RETRY
   classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
   classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
   classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
   classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
   classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+  classDef retry fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
     </div>
     <p style="font-size:13.5px;color:var(--mut)">A PDF either has selectable text (read it) or it's a scan (send the image to the vision model — case ⓑ). Either way the result is checked against the schema (ⓐ); if it doesn't fit, we re-ask once, then escalate to a stronger model, and only then flag for a human. Flaky API calls retry with a short back-off (ⓒ). Both outcomes — saved or flagged — are 📝 recorded.</p>
     <table>

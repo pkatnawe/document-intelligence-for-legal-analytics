@@ -77,11 +77,6 @@ flowchart TB
       </div>
       <div class="sfoot"><b>Stack:</b> Databricks Apps (API) · Foundation Model APIs (LLM/VLM) · Delta + Unity Catalog (storage &amp; audit) · DSPy (typed extraction) · Workflows (scale)</div>
     </div>
-    <div class="notes">
-      <div class="nlab">Talk-track — Slide A</div>
-      The problem is turning the firm's messy Claims paperwork into structured, queryable, auditable data. Our approach is a <b>cheap-first cascade</b>: a deterministic step handles the easy majority and we only spend an LLM when the system isn't confident — that's what keeps it fast <i>and</i> affordable. The three things the brief asks about are on the slide: failures are <b>escalated, never guessed</b> (worst case a human reviews); it <b>scales</b> by decoupling ingest from extraction and moving to provisioned throughput as volume grows; and the <b>audit trail is native to Databricks</b> — we configure Delta history, Unity Catalog lineage, and MLflow rather than build a logging system. That last point is the main reason we chose Databricks.
-    </div>
-
     <div class="card"><b>✓ Constraints this slide answers (from the brief):</b>
       <div class="anns" style="margin-top:8px">
         <div>Summarize problem, approach &amp; chosen stack ✓</div>
@@ -103,7 +98,7 @@ flowchart TB
 flowchart TB
   A["📥 PDF · Word · Excel · image"]:::io --> TL{"Text layer?"}:::dec
   TL -->|"yes — digital"| TX["📖 Read the text"]:::n
-  TL -->|"no — scan / image 🖼️"| OCR["🖼️ Page image + OCR"]:::n
+  TL -->|"no — scan / image 🖼️ ⓑ"| OCR["🖼️ Page image → vision model<br/>ⓑ image-only scan"]:::n
   TX & OCR --> SC["📋 Rules scorer<br/>keywords + structure + metadata"]:::n
   SC --> C{"confident? 📝"}:::dec
   C -->|"not sure"| CL["🧠 LLM zero-shot classify"]:::llm --> C2{"confident? 📝"}:::dec
@@ -114,10 +109,12 @@ flowchart TB
   RT -->|contract| E2["📑 Contract"]:::n
   RT -->|"email · minutes"| E3["✉️ Email/Minutes"]:::n
   E1 & E2 & E3 --> V{"✅ valid vs type's schema? 📝"}:::dec
-  V -->|"no → re-ask, escalate"| ES["🧠 stronger model"]:::llm --> V
+  V -->|"ⓐ no → re-ask, escalate"| ES["🧠 stronger model"]:::llm --> V
   V -->|yes| S[("💾 Save → Silver/Gold 📝")]:::d
   V -->|"still no"| H["🚩 Human 📝"]:::err
   S --> U["📊 reporting · search · summaries · totals"]:::d
+  RT -.-> RETRY[["ⓒ every model call retries on<br/>transient API errors (backoff)"]]:::retry
+  ES -.-> RETRY
   classDef io fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
   classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
   classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
@@ -125,6 +122,7 @@ flowchart TB
   classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
   classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
   classDef route fill:#1d2733,stroke:#4aa3ff,color:#cfe2ff;
+  classDef retry fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
       </div>
       <div class="anns">
         <div><b>All input types:</b> PDF / Word / Excel / image → digital files read directly; <b>image-only scans → page image + OCR</b>, then extracted by the <b>vision model</b></div>
@@ -136,11 +134,6 @@ flowchart TB
       </div>
       <div class="sfoot"><b>Part 2 builds the deep slice:</b> the PDF-invoice path (text-layer check → LLM/VLM extract → DSPy/Pydantic validate → async API), behind a job-id-then-poll endpoint.</div>
     </div>
-    <div class="notes">
-      <div class="nlab">Talk-track — Slide B</div>
-      Follow the green "yes" line — that's the easy ~90%, handled fast and cheap. At each checkpoint, if the system isn't confident it <b>escalates to a stronger model</b> instead of guessing, and a genuine failure goes to a person. The brief's three required failure modes are all here: unparseable output re-asks then escalates, image-only scans go to the vision model, and flaky API calls retry with back-off. Validated data lands in Delta and powers reporting, search, and the future Q&A. And because every escalation and human correction is captured, the system <b>improves on the firm's actual documents over time</b> — a POC that's a hypothesis, not a one-off.
-    </div>
-
     <div class="card"><b>✓ Constraints this slide answers (from the brief):</b>
       <div class="anns" style="margin-top:8px">
         <div>Step-by-step: ingest → classify → process ✓</div>

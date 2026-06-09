@@ -62,44 +62,71 @@ app.py                    # entry point (Databricks Apps / local uvicorn)
 app.yaml                  # Databricks Apps runtime config
 databricks.yml            # Asset Bundle (deploys the App)
 scripts/ingest_dataset.py # split the case PDF + drive the API end-to-end
-scripts/live_test.py      # component-level live E2E against Delta + Volume
-tests/                    # schema + store unit tests (no external deps)
+scripts/smoke_test.py     # 60-second check that a serving endpoint is reachable
+tests/                    # unit tests: schema, store, splitter, loader, orchestration
 ```
 
-## Run locally
+## Run it — two ways
 
-DSPy needs Python ≥ 3.11. Use the provided conda env (or any 3.11+ venv):
+DSPy needs Python ≥ 3.11. Everything else is in `requirements.txt`.
+
+### 1. Locally (fastest to try)
 
 ```bash
-conda activate invoice          # Python 3.12 with dspy, fastapi, etc.
+conda activate invoice          # Python 3.12 env with dspy, fastapi, etc.
 pip install -r requirements.txt
-cp .env.example .env             # fill in DATABRICKS_HOST + DATABRICKS_TOKEN + WAREHOUSE_ID
+cp .env.example .env             # set DATABRICKS_HOST, DATABRICKS_TOKEN, WAREHOUSE_ID
 set -a && source .env && set +a
 
 uvicorn app.api:app --reload --port 8000
-# open http://localhost:8000  → upload a PDF, watch the job + audit trail
+# open http://localhost:8000 → drag in a PDF → watch the job, audit trail, and result
 ```
 
 ```bash
-# or drive it from the CLI: split the case dataset and run all 3 invoices through the API
+# or drive it headless: split the case dataset and run all 3 invoices through the API
 PYTHONPATH=. python scripts/ingest_dataset.py
 ```
 
-Local development calls the **live** Databricks Foundation Model endpoints and **writes to
-the same Delta tables + UC Volume** — no deployment required to exercise the full flow.
+Even local runs call the **live** Databricks Foundation Models and write to the **same Delta
+tables + UC Volume + MLflow experiment** — no deploy needed to exercise the full flow.
 
-## Deploy to Databricks Apps
+### 2. On Databricks Apps (one command each)
 
 ```bash
-databricks bundle validate -t dev
-databricks bundle deploy   -t dev
-databricks bundle run      -t dev invoice_extractor
+databricks bundle validate -t dev    # check the config
+databricks bundle deploy   -t dev    # upload code + create the App and its secret
+databricks bundle run      -t dev invoice_extractor   # start it, print the URL
 ```
 
-The app runs on serverless Apps. Databricks injects the app service principal's OAuth, so
-`app.yaml` sets `DATABRICKS_AUTH_TYPE=pat` to keep using the configured PAT (which already
-has the right grants) and avoid the "more than one auth method" conflict. The bundle
-deploys unchanged to a paid workspace for production (`targets.prod`).
+## How deployment works — the Databricks Asset Bundle (DAB)
+
+`databricks.yml` is a **Databricks Asset Bundle** (now also called a *Declarative Automation
+Bundle*) — **infrastructure-as-code for Databricks**. Instead of clicking around the UI, the
+whole deployable unit is declared in one version-controlled file: the **App**, the **secret**
+that injects the token, and **per-environment targets** (`dev`, `prod`). The CLI reconciles
+the workspace to that declaration, so a deploy is **reproducible, reviewable, and reversible**.
+
+Why it matters here:
+
+- **Same code, promote by flag.** The identical bundle deploys to the Free-Edition POC
+  (`-t dev`) or a paid production workspace (`-t prod`) — only `workspace.host` changes. No
+  rewrite, no manual re-clicking, no "works on my workspace."
+- **Secrets by reference, never in git.** The PAT lives in a Databricks **secret scope**
+  (`invoice_poc/databricks_token`); `databricks.yml` declares it as an app resource and
+  `app.yaml` maps it in via `valueFrom`. The value is resolved at runtime by Databricks — it
+  is never committed.
+- **Auditable deploys.** Every infra change is a Git commit (who/what/when), and `prod` mode
+  runs the App as a **service principal** rather than a personal token.
+
+One auth nuance: Databricks Apps auto-inject the app service principal's OAuth, so `app.yaml`
+sets `DATABRICKS_AUTH_TYPE=pat` to use the configured PAT and avoid the SDK's "more than one
+authorization method" error.
+
+```bash
+# put the token into the secret scope once (never committed):
+databricks secrets create-scope invoice_poc
+databricks secrets put-secret invoice_poc databricks_token --string-value <YOUR_PAT>
+```
 
 ## Verified end-to-end (2026-06-09)
 
