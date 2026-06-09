@@ -184,24 +184,37 @@ function setStatus(el, status, live) {
 }
 
 async function submit(file) {
-  const el = card(file.name);
-  const t0 = performance.now();
-  const timer = setInterval(() => { el.querySelector('.el').textContent = ((performance.now()-t0)/1000).toFixed(1)+'s'; }, 100);
+  // Ingestion splits a multi-invoice PDF into one job per invoice (one doc = one invoice).
+  let resp;
   try {
     const fd = new FormData(); fd.append('file', file);
-    const r = await fetch('/api/extract', { method:'POST', body:fd });
-    if (!r.ok) throw new Error('submit failed: HTTP ' + r.status);
-    const { job_id } = await r.json();
-    el.querySelector('.jobid').textContent = job_id.slice(0, 8) + '…';
-    setStatus(el, 'PENDING', true);
-    el.querySelector('.steps').innerHTML = stepHTML(1);
-    await poll(job_id, el);
+    const r = await fetch('/api/ingest', { method:'POST', body:fd });
+    if (!r.ok) throw new Error('ingest failed: HTTP ' + r.status);
+    resp = await r.json();
   } catch (e) {
-    setStatus(el, 'FAILED', false);
+    const el = card(file.name); setStatus(el, 'FAILED', false);
     el.insertAdjacentHTML('beforeend', `<div class="err">${esc(e.message)}</div>`);
-  } finally {
-    clearInterval(timer);
+    return;
   }
+  if (resp.invoices > 1) {
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.innerHTML = `Split <b>${esc(resp.document)}</b> into <b>${resp.invoices}</b> invoices → ${resp.invoices} jobs`;
+    cards.prepend(note);
+  }
+  resp.jobs.forEach(j => track(j, resp.document, resp.invoices));
+}
+
+function track(j, docName, total) {
+  const el = card(j.filename);
+  if (total > 1) el.querySelector('.fname').insertAdjacentHTML('afterend',
+    `<span class="split">page ${j.page}</span>`);
+  el.querySelector('.jobid').textContent = j.job_id.slice(0, 8) + '…';
+  setStatus(el, 'PENDING', true);
+  el.querySelector('.steps').innerHTML = stepHTML(1);
+  const t0 = performance.now();
+  const timer = setInterval(() => { el.querySelector('.el').textContent = ((performance.now()-t0)/1000).toFixed(1)+'s'; }, 100);
+  poll(j.job_id, el).finally(() => clearInterval(timer));
 }
 
 async function poll(jobId, el) {

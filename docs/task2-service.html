@@ -110,7 +110,7 @@ PREMIUM = dspy.<span class="fn">LM</span>(<span class="st">"databricks/databrick
 ├─ store.py               <span class="cm"># JobStore Protocol + in-memory test double</span>
 ├─ observability.py       <span class="cm"># structlog + mlflow.dspy.autolog → experiment</span>
 ├─ web.py                 <span class="cm"># the upload UI served at /</span>
-└─ api.py                 <span class="cm"># FastAPI: /api/extract, /api/jobs/{id}, /audit</span></code></pre>
+└─ api.py                 <span class="cm"># FastAPI: /api/ingest (split→jobs), /api/extract, /api/jobs/{id}[/audit]</span></code></pre>
     </div>
     <p style="font-size:13.5px"><b>The three required failures, mapped:</b> <b>ⓐ</b> bad output → DSPy re-asks, escalate to premium, then fail cleanly (job <code>FAILED</code>, quarantined); <b>ⓑ</b> image-only / corrupt-text scan → text-layer check → VLM; <b>ⓒ</b> flaky API → retry with backoff (parse errors are <i>not</i> retried). MLflow autolog traces every call for the model-audit layer.</p>
 

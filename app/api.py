@@ -16,6 +16,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 
 from app.config import settings
+from app.documents.splitter import split_pdf
 from app.extract import process_job
 from app.llm import client
 from app.observability import configure as configure_logging
@@ -63,13 +64,39 @@ def health() -> dict:
 
 @app.post("/api/extract", status_code=202)
 async def submit(file: UploadFile, bg: BackgroundTasks) -> dict:
-    """Accept a PDF and return a job id immediately; extraction runs in the background."""
+    """Accept a PDF as a single invoice and return a job id immediately; extraction runs in
+    the background. (Multi-invoice files should use /api/ingest, which splits first.)"""
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="empty file")
     job = store.create(filename=file.filename)
     bg.add_task(process_job, store, job.id, data)
     return {"job_id": job.id, "status": job.status.value}
+
+
+@app.post("/api/ingest", status_code=202)
+async def ingest(file: UploadFile, bg: BackgroundTasks) -> dict:
+    """Ingestion entry point: a PDF may hold several invoices (one per page), so split it
+    into single-invoice documents and create one job per page. Returns the job ids
+    immediately; each extraction runs in the background. A single-invoice PDF yields one job.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty file")
+    base, _, ext = (file.filename or "document.pdf").rpartition(".")
+    base = base or (file.filename or "document")
+    try:
+        pages = split_pdf(data)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"could not read PDF: {exc}")
+
+    jobs = []
+    for sp in pages:
+        name = f"{base}_p{sp.index}.{ext or 'pdf'}" if len(pages) > 1 else (file.filename or "document.pdf")
+        job = store.create(filename=name)
+        bg.add_task(process_job, store, job.id, sp.pdf)
+        jobs.append({"job_id": job.id, "page": sp.index, "filename": name})
+    return {"document": file.filename, "invoices": len(jobs), "jobs": jobs}
 
 
 @app.get("/api/jobs/{job_id}")

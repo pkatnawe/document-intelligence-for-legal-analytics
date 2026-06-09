@@ -10,10 +10,12 @@ working docs under [`docs/`](docs/) (open [`docs/index.html`](docs/index.html)).
 
 ## What it does
 
-1. **Upload UI + async API.** A small web page (served at `/`) and `POST /api/extract` accept
-   a PDF and return a **job id immediately** (HTTP 202). Extraction runs on a background
-   worker, so user-facing latency is the upload time, not the model time. A second endpoint
-   `GET /api/jobs/{id}` is polled for the result.
+1. **Upload UI + async API.** A small web page (served at `/`) and `POST /api/ingest` accept
+   a PDF and return **job ids immediately** (HTTP 202) — one per invoice, since a file may
+   hold several (the splitter runs at ingestion). Extraction runs on a background worker, so
+   user-facing latency is the upload time, not the model time. `GET /api/jobs/{id}` is polled
+   for each result, and `GET /api/jobs/{id}/audit` returns the trail. (`POST /api/extract`
+   handles a single already-split invoice — used by the CLI.)
 2. **Read the document.** Digital PDFs use their text layer; **image-only scans — or a
    corrupt/encoded text layer (common in the real world)** — are rendered to a page image and
    sent to a vision model.
@@ -54,8 +56,8 @@ app/
 ├─ store.py               # JobStore Protocol + in-memory test double (no SQLite)
 ├─ store_delta.py         # Delta + UC Volume store (bound-parameter SQL); the runtime store
 ├─ observability.py       # structlog + mlflow.dspy.autolog → Databricks experiment
-├─ web.py                 # the upload UI (served at /)
-└─ api.py                 # FastAPI: POST /api/extract, GET /api/jobs/{id}, /audit
+├─ web.py                 # the upload UI (served at /), shows lifecycle + audit trail
+└─ api.py                 # FastAPI: POST /api/ingest (split→jobs), /api/extract, GET /api/jobs/{id}[/audit]
 app.py                    # entry point (Databricks Apps / local uvicorn)
 app.yaml                  # Databricks Apps runtime config
 databricks.yml            # Asset Bundle (deploys the App)

@@ -102,7 +102,7 @@ flowchart TB
       <tr><td>Scale to large volumes</td><td>Async API + Workflows + model tiering</td><td>Slow work runs off the request path, workers fan out, the cheap model absorbs the bulk</td></tr>
       <tr><td><b>Data model supports the audit trail</b></td><td><b>Databricks-native audit</b> + an append-only event log</td><td>Delta history/time-travel, UC lineage, UC access logs, MLflow — <i>configured, not built</i> <a href="storage-audit.html">⑤</a></td></tr>
       <tr><td>Downstream querying (reporting, totals)</td><td>Delta medallion → Gold tables</td><td>Plain SQL over clean, validated data</td></tr>
-      <tr><td>Extensibility for summarization / Q&A</td><td>Embeddings + Vector Search + DSPy signatures</td><td>A new capability is a new signature over the same data <a href="extensibility.html">⑥</a></td></tr>
+      <tr><td>Extensibility for summarization / Q&A / agents</td><td>Embeddings + Vector Search + DSPy signatures &amp; tools</td><td>A new capability is a new signature; agentic flows reuse the same governed data as tools <a href="extensibility.html">⑥</a></td></tr>
       <tr><td>Separate doc-handling / LLM / validation</td><td><b>DSPy</b> typed signature (= interface + Pydantic contract)</td><td>The separation is structural — that's <i>why DSPy</i></td></tr>
       <tr><td>Async API: job id now, result later</td><td>HTTP 202 + background worker + Delta job store</td><td>User-facing latency decoupled from extraction time</td></tr>
     </table>

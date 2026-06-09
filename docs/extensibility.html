@@ -16,6 +16,7 @@
     <p class="lead">The brief asks for two forward-looking things: room to add LLM summarization/Q&A later, and a story for scaling to large volumes. Both come down to choices made now.</p>
     <div class="tldr"><div class="tlh">TL;DR</div><ul>
       <li>Data is stored so summarization/Q&A is a <b>later add-on, not a rewrite</b> (raw + page-chunks + embeddings + metadata).</li>
+      <li><b>Agentic flows</b> follow for free: the agent's tools (SQL, vector search, cross-doc joins) <i>are</i> the artifacts the pipeline already produces, governed by Unity Catalog.</li>
       <li>Scales gracefully: async + Workflows + model tiering, moving to provisioned throughput at high volume.</li>
       <li>User-facing latency stays low — the API returns a job id in <span class="metric">milliseconds</span>; extraction runs off the request path.</li>
     </ul></div>
@@ -31,6 +32,34 @@ flowchart LR
   end
     </div>
     <p style="font-size:13.5px;color:var(--mut)">Everything left of the dotted box we build during the POC anyway. The Q&A feature on the right just plugs into the searchable index — in our stack, simply another DSPy signature reusing the same models. Citations work because we split documents by page, so every answer can point back to its source.</p>
+
+    <h2>From Q&A to agentic flows</h2>
+    <p>Single-shot RAG answers one passage-level question. The Claims questions that matter are <b>multi-step and cross-document</b> — "summarise everything about claim&nbsp;#1234: what was billed, what the contract obliges, what was agreed in the minutes, and what's still open." That's an <b>agent</b>: it plans, calls tools, reasons over the results, and cites its sources. The key point for the brief's "extensibility" ask is that <b>we are not adding new infrastructure for this — the agent's tools are the artifacts the POC already produces</b>.</p>
+    <div class="mermaid">
+flowchart TB
+  AG{{"🤖 Claims agent (DSPy ReAct) plans → calls tools → composes a cited answer 📝"}}:::llm
+  subgraph TOOLS["Tools = what the pipeline already built"]
+    T1["🧮 SQL over Gold totals / aggregates"]:::n
+    T2["🔍 Vector search cited passages"]:::n
+    T3["🗂️ Join by claim id across invoice · contract · email"]:::n
+    T4["🕓 Delta time-travel what changed, when"]:::n
+  end
+  UC["🔐 Unity Catalog governs every tool call (per-client access)"]:::aud
+  AG --> T1 & T2 & T3 & T4
+  T1 & T2 & T3 & T4 -.-> UC
+classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+    </div>
+    <table>
+      <tr><th>What makes agents cheap to add</th><th>Decision made now</th></tr>
+      <tr><td>Agents are <b>signatures + tools</b>, not a new framework</td><td>DSPy already; a ReAct/tool-using module reuses the same typed contracts and the same tiered models</td></tr>
+      <tr><td>The tools already exist as governed data</td><td>Gold tables (SQL), the page-chunk vector index, shared <code>claim id</code> keys, Delta history — all built for extraction/reporting anyway</td></tr>
+      <tr><td>Agents can't leak across clients</td><td>Every tool call runs through <b>Unity Catalog</b>, so an agent inherits the asker's row/column access — confidentiality is enforced by the platform, not the prompt</td></tr>
+      <tr><td>Multi-step reasoning stays auditable</td><td>MLflow tracing already records every model call; an agent's plan + each tool call lands in the same trace + audit log</td></tr>
+      <tr><td>Agents don't sit on the request path</td><td>The same async/job-store pattern — a long agentic run returns a job id and is polled, identical to extraction</td></tr>
+    </table>
+    <p style="font-size:13.5px;color:var(--mut)">So the progression is deliberate: <b>extract → store well → retrieve → answer → act</b>. Each step is the substrate for the next, which is why summarization, Q&A, and eventually agentic Claims workflows are configuration over the same data, not a second system.</p>
 
     <h2>The hardest queries — and why the design already handles them</h2>
     <p>A good slide names the hard cases. The pattern: the genuinely hard queries are <b>structured</b> ones, and those are cheaper and more reliable <i>without</i> an LLM — reserve the LLM for the semantic tail.</p>

@@ -78,7 +78,7 @@ def run_extraction(*, text: str | None = None, image_uri: str | None = None) -> 
 
 
 def process_job(store: JobStore, job_id: str, data: bytes) -> None:
-    """Background worker: store the raw PDF -> read -> classify path -> extract one invoice
+    """Background worker: store the raw PDF -> read (text or vision) -> extract one invoice
     -> validate -> persist. One document is one invoice (multi-invoice files are split
     upstream in ingestion)."""
     store.update(job_id, status=JobStatus.RUNNING)
