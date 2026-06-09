@@ -26,6 +26,7 @@ const NAV = [
   ]},
   {g:'Tracking', items:[
     {f:'decisions.html',      n:'⑧ Decisions & Open Qs',     s:'o'},
+    {f:'tech-debt.html',      n:'⚠ Tech Debt & Scaling',     s:'o'},
   ]},
   {g:'Part 2 — Service (built · deployed)', items:[
     {f:'task2-service.html',  n:'⑨ Extraction Service',      s:'d'},

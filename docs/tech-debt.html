@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⚠ Technical Debt &amp; Scaling</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Tracking · honest assessment</div>
+    <h1>Technical Debt &amp; Scaling</h1>
+    <p class="lead">What's weakest in this build, named before the panel names it — and the concrete things that have to change as volume grows. A POC earns trust by being honest about its edges, not by hiding them.</p>
+
+    <div class="callout warn"><strong>The single weakest point:</strong> on Free Edition the open-weight vision model (<code>gemma-3-12b</code>) misreads dense receipts — it got the Uber total wrong. We don't hide that: the <b>reconciliation check catches it and flags the job for human review</b> rather than storing a confident wrong answer, and production swaps tier-2 to the vision-capable <code>claude-opus-4-8</code>, which reads it correctly. The accuracy gap is a model-tier choice (config), not a pipeline flaw — but it's the first thing I'd put on the table.</div>
+
+    <h2>Technical debt — what we'd fix, in priority order</h2>
+    <p>Each item: the debt, what it costs us, and the planned fix. Most are deliberate POC scoping, not accidents.</p>
+    <table>
+      <tr><th>#</th><th>Debt</th><th>Impact</th><th>Planned fix</th></tr>
+      <tr><td>1</td><td><b>Open-weight model accuracy</b> on Free Edition (Uber misread)</td><td>Wrong amounts on dense receipts — currently <i>caught + flagged</i>, not silent</td><td>Production tier-2 = <code>claude-opus-4-8</code> (vision); reconciliation already guards it; GEPA-tune the prompt on real data</td></tr>
+      <tr><td>2</td><td><b>Vision escalation is a no-op on Free Edition</b> — tier-2 (<code>llama-3-3-70b</code>) is text-only</td><td>A scan that fails reconciliation can't be re-read by a stronger model; it goes straight to human</td><td>Paid workspace: tier-2 is vision-capable, so escalation actually re-reads the image before falling back to a human</td></tr>
+      <tr><td>3</td><td><b>Job status lives in Delta</b> (hot-row updates under polling)</td><td>Delta is built for append + history, not a row flipping PENDING→RUNNING→DONE while it's polled — write contention at high volume</td><td>Move job <i>status</i> to a transactional store (e.g. Lakebase) behind the same <code>JobStore</code> interface; Delta keeps results + audit. <i>No service change.</i></td></tr>
+      <tr><td>4</td><td><b>In-process background worker</b> (FastAPI <code>BackgroundTasks</code>); no durable queue or orphan recovery</td><td>If the app restarts mid-job, the job is stuck <code>RUNNING</code> — the row survives, but nothing requeues it</td><td>Durable queue + autoscaling workers (Databricks Workflows); a sweeper that requeues stale <code>RUNNING</code> jobs; per-job retry + dead-letter</td></tr>
+      <tr><td>5</td><td><b>Thresholds are hand-tuned</b> (text-layer ratio 0.6, reconcile tolerance, confidence gate)</td><td>Guesses until we have data; could mis-route or over/under-flag on the firm's real mix</td><td>Tune from the accumulating gold set; GEPA optimizes the prompt against the eval metric (see <a href="eval.html">✓ Evaluation</a>)</td></tr>
+      <tr><td>6</td><td><b>Reconciliation catches only arithmetic inconsistency</b></td><td>A wrong-but-self-consistent value slips through (e.g. WeWork's one-character invoice-number OCR slip)</td><td>That's what the premium model + human review are for; field-level confidence + cross-field checks later</td></tr>
+      <tr><td>7</td><td><b>Single document type in code</b> (invoice); the splitter assumes one invoice per page</td><td>A multi-page single invoice would be wrongly split; contracts/emails aren't handled in code</td><td>Classification + routing (rules→LLM ladder) and multi-page grouping are the platform design (<a href="classification.html">④</a>), built when scope expands</td></tr>
+      <tr><td>8</td><td><b>Confidentiality / PII not implemented</b></td><td>Legal docs carry privileged data; we don't yet redact or pin model placement</td><td>UC governance + a redaction step before any model call; route sensitive docs to the in-perimeter model (<a href="decisions.html">⑧ open question</a>)</td></tr>
+      <tr><td>9</td><td><b>Chatty persistence</b> — several synchronous SQL round-trips per job (status + each audit event)</td><td>Fine at POC volume; adds latency and warehouse load at scale</td><td>Batch audit writes; async/buffered writes; the transactional status store (item 3) absorbs the hot path</td></tr>
+      <tr><td>10</td><td><b>Auth is a PAT</b> in a secret scope</td><td>A long-lived token; fine for a POC, not ideal for production</td><td>Run as a service principal with OAuth (prod bundle mode already steers to this) + rotation</td></tr>
+    </table>
+
+    <h2>Key things to consider as we scale</h2>
+    <p>The architecture is designed so each of these is a <b>lever pulled at one stage</b>, not a rewrite — but each needs a real decision as volume grows.</p>
+    <div class="grid2">
+      <div class="card"><h3>⚙️ Throughput &amp; workers</h3><p style="font-size:13px">In-app worker → durable queue + <b>Databricks Workflows</b> autoscaling. Make jobs <b>idempotent</b> (job id is the key), add retries + a <b>dead-letter</b> path so one bad document never blocks a batch, and a sweeper to recover orphaned <code>RUNNING</code> jobs after a restart.</p></div>
+      <div class="card"><h3>🧠 Model serving</h3><p style="font-size:13px">Pay-per-token has per-minute rate limits → move to <b>provisioned throughput</b> for guaranteed, autoscaling capacity. Keep the <b>cascade</b> (cheap bulk, premium tail) as the primary cost lever; consider request batching and only sending the relevant page(s).</p></div>
+      <div class="card"><h3>🗄️ Storage &amp; concurrency</h3><p style="font-size:13px">Split the hot path (job status → transactional store) from the cold path (results + append-only audit → Delta). <b>Partition Delta by date/client</b>; manage the UC Volume's raw-PDF lifecycle (retention/archival). Watch Delta optimistic-concurrency conflicts on status writes.</p></div>
+      <div class="card"><h3>🔐 Governance &amp; multi-tenancy</h3><p style="font-size:13px"><b>Unity Catalog</b> isolates one client's documents from another's. Add PII redaction before model calls and pin <b>model placement</b> (in-perimeter vs cross-geo) for sensitive data — the confidentiality work we flagged but didn't build.</p></div>
+      <div class="card"><h3>📊 Observability at volume</h3><p style="font-size:13px">MLflow autolog traces every call; at scale, store traces in <b>Unity Catalog</b> (past the 100k-trace limit) and alert on <b>escalation-rate</b> and <b>reconcile-flag-rate</b> spikes (the early signal of drift or a bad vendor template).</p></div>
+      <div class="card"><h3>📈 Quality &amp; drift</h3><p style="font-size:13px">Grow the gold set from human-flagged cases; re-score every release in MLflow; <b>GEPA</b>-optimize the prompt and tune thresholds on the firm's real invoices. Improvement becomes measured, not anecdotal (see <a href="eval.html">✓ Evaluation</a>).</p></div>
+    </div>
+
+    <h2>What does NOT need to change to scale</h2>
+    <p>Worth saying out loud — the load-bearing choices hold up:</p>
+    <ul>
+      <li>The <b>async contract</b> (202 + poll) already decouples user-facing latency from extraction time — the API doesn't get slower as the model does.</li>
+      <li>Each document is <b>independent</b>, so extraction is embarrassingly parallel — scaling is adding workers, not redesigning.</li>
+      <li>The <b>cascade</b> keeps cost flat-ish as volume grows (the cheap model absorbs the bulk).</li>
+      <li>The <code>JobStore</code> <b>interface</b> is the seam: SQLite-style → Delta → transactional, no change to the service logic.</li>
+      <li>Model choice is <b>config, not code</b> — swap tiers (or whole providers) with env vars.</li>
+    </ul>
+
+    <div class="callout win"><strong>The framing:</strong> none of this is hidden risk — it's a scoped POC with a clear upgrade path at every stage. The design pays for itself by making each scale lever a config or interface change, and by never letting a known weakness (a weak model) turn into a silent wrong answer.</div>
+
+    <div class="pagenav">
+      <a href="decisions.html">← ⑧ Decisions &amp; Open Qs</a>
+      <a href="presentation.html">🎤 Presentation Prep</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
