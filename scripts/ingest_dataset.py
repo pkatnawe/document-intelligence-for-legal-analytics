@@ -33,7 +33,7 @@ def poll(job_id: str, timeout: int = 240) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = requests.get(f"{API}/api/jobs/{job_id}", headers=HEADERS, timeout=30).json()
-        if job["status"] in ("SUCCEEDED", "FAILED"):
+        if job.get("status") in ("SUCCEEDED", "FAILED"):  # .get(): tolerate the brief pre-INSERT 404 window
             return job
         time.sleep(4)
     return {"status": "TIMEOUT", "id": job_id}

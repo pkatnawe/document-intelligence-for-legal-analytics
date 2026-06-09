@@ -68,8 +68,8 @@
       <p style="font-size:13px"><span class="pro">In one line:</span> <i>"Embeddings map text to vectors where closeness means similar meaning — that's what powers semantic search."</i></p>
     </div>
     <div class="card">
-      <h3>VLM &amp; OCR</h3>
-      <p style="font-size:13.5px"><b>OCR</b> reads characters off an image (deterministic, fails by garbling characters). A <b>VLM</b> is an LLM that can see images and reason over layout (higher accuracy, but can hallucinate). <b>In our plan:</b> OCR reads scans for classification; the VLM extracts scans — in the POC that's <code>gemma-3-12b</code> (vision), with production escalating to the vision-capable <code>claude-opus-4-8</code>.</p>
+      <h3>VLM vs OCR</h3>
+      <p style="font-size:13.5px"><b>OCR</b> reads characters off an image (deterministic, but <b>flattens layout</b> and is lossy on degraded scans). A <b>VLM</b> is an LLM that sees the image and reasons over layout directly (higher accuracy, but can hallucinate). <b>In our plan:</b> we read scans with a <b>classification-guided VLM</b>, not OCR — invoices are spatial, and one OCR pipeline doesn't scale across layouts. The POC VLM is <code>gemma-3-12b</code>; production escalates to <code>claude-opus-4-8</code>. The VLM's hallucination risk is caught downstream by validation + reconciliation + human-flagging, not by reverting to OCR.</p>
     </div>
 
     <h2>Framework / tooling</h2>
@@ -148,14 +148,14 @@
     <div class="card">
       <h3>Seeing is Believing? (KIE-HVQA) — the failure mode <span class="tag">ByteDance, NeurIPS 2025</span></h3>
       <p style="font-size:13.5px"><b>Main idea:</b> under visual degradation (blur, occlusion), vision-language models lean on language priors and <b>hallucinate</b> plausible-but-wrong document values instead of admitting they can't read it. They build a benchmark (KIE-HVQA) and train a model — via reinforcement learning with a reward for <i>refusing when unsure</i> — that beats GPT-4o by <b>~28%</b> on hallucination-free accuracy under degradation.</p>
-      <p style="font-size:13px"><b>What we took &amp; why:</b> the evidence for two of our calls — use deterministic OCR (not a VLM) to <i>classify</i> scans, and route low-confidence scans to escalation/human rather than letting a model guess. Signal uncertainty, don't fabricate.<sup class="src"><a href="https://arxiv.org/abs/2506.20168" target="_blank">[2]</a></sup></p>
+      <p style="font-size:13px"><b>What we took &amp; why:</b> it's the evidence for our <b>downstream guard</b> — because a VLM can hallucinate on a degraded scan, we don't trust a single read: schema validation + line-items-vs-total reconciliation + human-flagging catch it. Signal uncertainty, don't fabricate. (Note: this is why we don't avoid the VLM — we verify it.)<sup class="src"><a href="https://arxiv.org/abs/2506.20168" target="_blank">[2]</a></sup></p>
       <p style="font-size:13px"><span class="wt">📦 Usable data:</span> KIE-HVQA is public on HuggingFace and includes <b>invoices with simulated degradation</b> — an off-the-shelf eval set for our scan / hallucination handling. <a href="https://huggingface.co/datasets/bytedance-research/KIE-HVQA" target="_blank">huggingface.co/datasets/bytedance-research/KIE-HVQA</a></p>
     </div>
 
     <div class="card">
       <h3>Classification-guided LVLM — the architecture <span class="tag">Nature Sci. Reports, 2026</span></h3>
-      <p style="font-size:13.5px"><b>Main idea:</b> for mixed document types, <b>decouple</b> type-classification from extraction — classify first (they even offer a <i>training-free keyword classifier over OCR text</i>), inject a type-specific prompt, then run the vision-language model. Zero-shot, it beat a supervised baseline by <b>~18 F1 points</b>.</p>
-      <p style="font-size:13px"><b>What we took &amp; why:</b> the whole shape of our pipeline — classify → route → type-specific extract — <i>and</i> our keyword-over-OCR classifier (decision C) is literally their training-free option. Peer-reviewed proof that our architecture and our cheap classifier are the accurate, low-supervision design.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[3]</a></sup></p>
+      <p style="font-size:13.5px"><b>Main idea:</b> for mixed document types, <b>decouple</b> type-classification from extraction — classify first (a lightweight, even <i>training-free</i> classifier), inject a type-specific prompt, then run the vision-language model on the image. Zero-shot, it beat a supervised baseline by <b>~18 F1 points</b>; removing the classify step alone cost 18 F1.</p>
+      <p style="font-size:13px"><b>What we took &amp; why:</b> the whole shape of our reading approach — <b>classification-guided VLM, not OCR</b>. The VLM reads layout directly (invoices are spatial) and per-type prompts scale across templates, where one OCR pipeline doesn't. Peer-reviewed proof this is the accurate, low-supervision, layout-faithful design — and the classifier + prompts are GEPA-optimized later.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[3]</a></sup></p>
       <p style="font-size:13px"><span class="wt">📦 Usable code:</span> their Multi-VIE code and a fine-tuned Qwen2.5-VL model are public. <a href="https://github.com/FairmeHIT/Multi-VIE" target="_blank">github.com/FairmeHIT/Multi-VIE</a></p>
     </div>
 

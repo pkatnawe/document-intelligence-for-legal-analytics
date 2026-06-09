@@ -22,9 +22,14 @@ env:
   - name: TIER2_MODEL
     value: "databricks-meta-llama-3-3-70b-instruct"
 
-  # MLflow experiment that receives the DSPy traces (the model-audit layer).
+  # MLflow tracing (model-audit layer) — records every LLM/VLM call with its input, output,
+  # tokens, latency, and state. Kept ON; exported ASYNC and fail-fast so it never adds to job
+  # latency. On Free Edition the core trace still exports fine; only the heavy image
+  # *attachment* upload is egress-blocked (works fully on a paid workspace).
   - name: MLFLOW_EXPERIMENT
-    value: "/Users/pkatnawe@uwo.ca/invoice-extraction"
+    value: "/Users/pkatnawe@uwo.ca/Invoice-Extraction"
+  - name: MLFLOW_ENABLE_ASYNC_TRACE_LOGGING
+    value: "true"
 
   # Delta-backed store (Unity Catalog) via a serverless SQL warehouse.
   - name: WAREHOUSE_ID

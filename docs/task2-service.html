@@ -22,7 +22,7 @@
     <table>
       <tr><th>In the code (built)</th><th>On the slides only</th></tr>
       <tr><td>PDF load + text-layer check; render scan → VLM</td><td>Multi-format ingest (Word/Excel/email)</td></tr>
-      <tr><td>Ingestion <b>splitter</b>: multi-invoice PDF → single-invoice docs</td><td>Full classification + OCR ladder</td></tr>
+      <tr><td>Ingestion <b>splitter</b>: multi-invoice PDF → single-invoice docs</td><td>Full classification ladder (classification-guided VLM)</td></tr>
       <tr><td>DSPy typed extraction + the 3 failure cases</td><td>Full medallion data model</td></tr>
       <tr><td>Async API + upload UI + Delta/Volume/audit + MLflow</td><td>Vector search, CI/CD, Workflows scaling</td></tr>
     </table>
@@ -35,7 +35,7 @@
     <p>Case ⓑ is "PDFs with no embedded text layer (image-only scans)." Handling it has two parts: <b>detect</b> that there's no usable text, then <b>read</b> the page anyway. We considered three ways and built the third.</p>
     <table>
       <tr><th>Option</th><th>How it reads a scan</th><th>Verdict</th></tr>
-      <tr><td>OCR-first (Tesseract)</td><td>Transcribe the image to text with OCR, then run the text model</td><td>Rejected for the service — adds a system binary (Tesseract/poppler), and OCR is lossy on seals/low-contrast/odd fonts (the research confirms degraded-doc failure)</td></tr>
+      <tr><td>OCR-first (Tesseract)</td><td>Transcribe the image to text with OCR, then run the text model</td><td>Rejected — adds a system binary (Tesseract/poppler), <b>flattens the spatial layout</b> invoices depend on, is lossy on degraded scans, and one OCR pipeline doesn't scale across layouts (matches the platform's classification-guided-VLM decision)</td></tr>
       <tr><td>One model for everything</td><td>Send every page image to the VLM, no detection</td><td>Rejected — wastes the vision model (and tokens) on clean digital PDFs that already have perfect text</td></tr>
       <tr><td><b>Text-layer check → VLM</b> (built)</td><td>Cheaply detect whether real text exists; if not, send the page <i>image</i> to the vision model — which reads layout directly, no OCR step</td><td><b>Chosen</b> — no external binary, the VLM beats OCR on messy scans, and clean PDFs skip the model entirely</td></tr>
     </table>
@@ -50,7 +50,7 @@
       <tr><td><code>""</code> (true scan)</td><td>✗</td><td>—</td><td>vision model (ⓑ)</td></tr>
       <tr><td><code>\x02\x05…</code> (garbled font)</td><td>✓</td><td>✗</td><td>vision model (ⓑ)</td></tr>
     </table>
-    <p style="font-size:13px;color:var(--mut)">Then the page is rendered to PNG (PyMuPDF, 200 dpi) and the densest page leads, so a blank cover never wins. The thresholds (20 chars, 0.6 ratio, 200 dpi) are heuristics tuned for invoices — exactly what we'd validate against the firm's real document mix. Note: the platform slides list OCR as one option for the <i>classification</i> stage; the built service skips OCR entirely.</p>
+    <p style="font-size:13px;color:var(--mut)">Then the page is rendered to PNG (PyMuPDF, 200 dpi) and the densest page leads, so a blank cover never wins. The thresholds (20 chars, 0.6 ratio, 200 dpi) are heuristics tuned for invoices — exactly what we'd validate against the firm's real document mix. Note: the platform design reads scans with a classification-guided VLM (not OCR); the built service is the single-type slice of that — it skips classification and reads the image with the VLM directly.</p>
 
     <h2>The async API — why it's shaped this way</h2>
     <p>Extraction takes seconds, so a normal blocking request would hold the connection open and time out under load. Instead: <b>POST returns a job id immediately</b> (202), the work runs on a background worker, and the client <b>polls a second endpoint</b> for the result. User-facing latency becomes the time to accept the upload, not the time to extract.</p>

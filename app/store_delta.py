@@ -101,8 +101,8 @@ class DeltaJobStore:
             return r.result.data_array
         return []
 
-    def create(self, filename: Optional[str]) -> Job:
-        job = Job(id=str(uuid.uuid4()), filename=filename)
+    def create(self, filename: Optional[str], job_id: Optional[str] = None) -> Job:
+        job = Job(id=job_id or str(uuid.uuid4()), filename=filename)
         self._exec(
             f"INSERT INTO {self.jobs}(id,status,filename,created_at,updated_at) "
             "VALUES(:id,:status,:filename,:created_at,:updated_at)",
@@ -150,6 +150,19 @@ class DeltaJobStore:
             "VALUES(:event_id,:job_id,:ts,:stage,:detail)",
             params={"event_id": str(uuid.uuid4()), "job_id": job_id, "ts": _now(),
                     "stage": stage, "detail": detail},
+        )
+
+    def append_audit_many(self, job_id: str, events: list[tuple[str, str, str]]) -> None:
+        """Write several (ts, stage, detail) events in one INSERT — one round-trip, not N."""
+        if not events:
+            return
+        rows, params = [], {"job_id": job_id}
+        for i, (ts, stage, detail) in enumerate(events):
+            rows.append(f"(:e{i},:job_id,:ts{i},:s{i},:d{i})")
+            params |= {f"e{i}": str(uuid.uuid4()), f"ts{i}": ts, f"s{i}": stage, f"d{i}": detail}
+        self._exec(
+            f"INSERT INTO {self.audit}(event_id,job_id,ts,stage,detail) VALUES " + ",".join(rows),
+            params=params,
         )
 
     def get_audit(self, job_id: str) -> list[dict]:

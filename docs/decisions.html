@@ -21,7 +21,8 @@
       <div class="kk"><div class="t">Dev / test loop</div><div>Test live models from the laptop; deploy the app last. <span class="tag">verified working</span></div></div>
       <div class="kk"><div class="t">Classifier</div><div>Rules over text (not an LLM) for determinism + auditability, with a confidence-gated escalation ladder. <a href="classification.html">④</a></div></div>
       <div class="kk"><div class="t">Input guard</div><div>Below-threshold → reject fast, with the reason and which signals fired.</div></div>
-      <div class="kk"><div class="t">Scan routing</div><div>Deterministic OCR reads scans for classification (bounded failure); garbled scans auto-escalate to the VLM. Extraction of scans always uses the VLM. <a href="classification.html">④</a></div></div>
+      <div class="kk"><div class="t">Classification-guided VLM (not OCR)</div><div>Read documents with a <b>classification-guided vision-language model</b>: classify the type, then run a <b>type-specific prompt</b> on the page image — the VLM reads layout directly. <b>OCR was the obvious option; rejected</b> because it flattens the spatial layout invoices depend on (line-item tables, positioned totals), is lossy on degraded scans, and a single OCR pipeline doesn't generalize across diverse layouts — it doesn't scale. The Nature paper shows classify-then-guide beats a baseline by ~18 F1. <a href="classification.html">④</a></div></div>
+      <div class="kk"><div class="t">Optimize the classifier + prompts later</div><div>Ship hand-tuned today; once human-flagged examples accumulate, use <b>GEPA</b> ("optimize anything") to evolve the type-specific prompts and tune the classifier on the firm's real documents — sample-efficient, auditable. <a href="eval.html">Evaluation</a></div></div>
       <div class="kk"><div class="t">Training data</div><div>Capture the hard / escalated / human-corrected cases — not auto-label everything.</div></div>
       <div class="kk"><div class="t">Storage + audit</div><div>Medallion (Delta) + Unity Catalog + an append-only event log. <a href="storage-audit.html">⑤</a></div></div>
       <div class="kk"><div class="t">Two audit layers</div><div>Business event log (state changes) + MLflow tracing (model calls). MLflow wired in code, ~2 lines.</div></div>
@@ -42,11 +43,11 @@
     <h2>Open questions</h2>
     <p class="lead">The four big forks are resolved (above). The buttons stay so you can revisit; your picks save in your browser — click <b>Copy my decisions</b> to send them back to me.</p>
     <div class="oq" data-oq="scan-routing">
-      <div class="q"><b>Scan classification</b></div>
+      <div class="q"><b>Document reading</b></div>
       <div class="lean">
-        <button data-v="A: metadata-first">A · metadata</button>
-        <button data-v="B: VLM one-call">B · VLM</button>
-        <button data-v="C: OCR-then-rules">C · OCR-then-rules</button>
+        <button data-v="classification-guided VLM (rec)">classification-guided VLM</button>
+        <button data-v="OCR-then-rules">OCR-then-rules</button>
+        <button data-v="one VLM call, no classify">one VLM, no classify</button>
       </div>
     </div>
     <div class="oq" data-oq="storage">
@@ -81,7 +82,7 @@
     </div>
 
     <h2>Still genuinely open</h2>
-    <p>Deferred on purpose, to settle with real data rather than guess: whether the document mix is clean enough for OCR-first (test on their docs), and the exact confidence thresholds (tune once extractions accumulate — see <a href="eval.html">Evaluation</a>).</p>
+    <p>Deferred on purpose, to settle with real data rather than guess: which classifier the document mix needs (training-free feature-matching vs a small trained image model), and the exact confidence thresholds (tune once extractions accumulate — see <a href="eval.html">Evaluation</a>).</p>
     <div class="callout warn"><strong>⚖️ Sensitive data &amp; confidentiality — flagged, not building yet.</strong> Legal documents carry PII and privileged information, so a real engagement must decide <b>what may be sent to which model at all</b> — a question for the firm's experts, not us to assume. Open threads: which content is AI-eligible vs human-only; whether to <b>redact</b> PII before any model call; and <b>model placement</b> — our tier-1 <code>gemini-3-5-flash</code> is a <i>global, cross-geo</i> endpoint (data leaves the region) while tier-2 <code>claude-opus-4-8</code> sits <i>inside the Databricks perimeter</i>, so sensitive documents would favour the in-perimeter model. We're not implementing this for the POC, but the design leaves room (Unity Catalog governance + a redaction step before extraction).</div>
 
     <h2>External data &amp; code we could use <span class="b decided">flagged</span></h2>

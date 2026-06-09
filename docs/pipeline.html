@@ -17,7 +17,7 @@
     <div class="tldr"><div class="tlh">TL;DR</div><ul>
       <li>Flow: <b>read (any format) → classify → route by type → extract → validate → store</b>.</li>
       <li>The three required failure cases are handled: unparseable output, image-only scans, transient API errors.</li>
-      <li>Scanned / image-only documents are a first-class path — OCR for classification, a vision model for extraction.</li>
+      <li>Scanned / image-only documents are a first-class path — classified by type, then read by a <b>classification-guided vision model</b> (no OCR — it preserves layout).</li>
       <li>Every decision is recorded to the audit trail.</li>
     </ul></div>
 
@@ -25,18 +25,18 @@
 flowchart TB
   A["📥 PDF · Word · Excel · image<br/>(API or batch)"]:::io --> TL{"Has a text layer?"}:::dec
   TL -->|"yes — digital file"| TX["📖 Read the text directly"]:::n
-  TL -->|"no — scan / image-only 🖼️"| OCR["🖼️ Render page → image<br/>+ OCR the text"]:::n
-  TX --> SC["📋 Rules scorer over the text<br/>weighted keywords + structure + metadata"]:::n
-  OCR --> SC
+  TL -->|"no — scan / image-only 🖼️"| IMG["🖼️ Render page → image<br/>(no OCR — keep the layout)"]:::n
+  TX --> SC["📋 Classify the type<br/>rules on text · image classifier on scans"]:::n
+  IMG --> SC
   SC --> C{"confident? 📝"}:::dec
-  C -->|"not sure — the tail"| CL["🧠 LLM zero-shot classify"]:::llm
+  C -->|"not sure — the tail"| CL["🧠 LLM/VLM classify"]:::llm
   CL --> C2{"confident? 📝"}:::dec
   C2 -->|"no"| UNK["🚩 Unknown → human 📝"]:::err
   C -->|"yes ~90%"| RT{{"route by document type"}}:::route
   C2 -->|"yes"| RT
-  RT -->|"invoice"| E1["🧾 Invoice extractor<br/>header + line-items"]:::n
-  RT -->|"contract"| E2["📑 Contract extractor<br/>parties · dates · clauses"]:::n
-  RT -->|"email · minutes"| E3["✉️ Email / Minutes extractor<br/>participants · actions"]:::n
+  RT -->|"invoice"| E1["🧾 Invoice — type-specific prompt<br/>header + line-items (VLM on image)"]:::n
+  RT -->|"contract"| E2["📑 Contract — parties · dates · clauses"]:::n
+  RT -->|"email · minutes"| E3["✉️ Email / Minutes — participants · actions"]:::n
   E1 & E2 & E3 --> V{"✅ valid vs that type's schema? 📝"}:::dec
   V -->|"no → re-ask, then escalate"| ES["🧠 Stronger model"]:::llm --> V
   V -->|"yes"| S[("💾 Save → Silver/Gold 📝")]:::d
@@ -55,7 +55,7 @@ flowchart TB
   classDef route fill:#1d2733,stroke:#4aa3ff,color:#cfe2ff;
   classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
     </div>
-    <p style="font-size:13.5px;color:var(--mut)"><b>Read it (top).</b> Every input type — PDF, Word, Excel, image — meets one question: is there a text layer? <b>Digital files</b> are read directly; <b>image-only files (scans, photos)</b> are rendered to a page image and OCR'd. Either way we now have text to classify, and we <i>remember</i> whether it was a scan. <b>Classify:</b> a cheap rules scorer scores that text (keywords + structure + metadata) — confident → route, unsure → escalate to an LLM classifier, genuine unknown → human. <b>Route &amp; extract:</b> each document type goes to its <b>own extractor + schema</b><sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[2]</a></sup> — and here the scan flag matters: <b>image-only docs are extracted by the vision model from their page image</b>, digital ones by the text LLM, each escalating to a stronger model only when validation fails.<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[1]</a></sup> Every 📝 step is recorded.</p>
+    <p style="font-size:13.5px;color:var(--mut)"><b>Read it (top).</b> Every input type — PDF, Word, Excel, image — meets one question: is there a text layer? <b>Digital files</b> are read directly; <b>image-only files (scans, photos)</b> are rendered to a page image — <b>no OCR</b>, because OCR flattens the spatial layout invoices depend on. <b>Classify:</b> predict the document type (rules over text for digital, a lightweight image classifier for scans) — confident → route, unsure → escalate to an LLM/VLM classifier, genuine unknown → human. <b>Route &amp; extract — classification-guided:</b> the type selects a <b>type-specific prompt + schema</b>, and the <b>vision model reads the page image directly</b> (digital docs use the text LLM); decoupling classify from extract is the published state of the art for mixed documents — ~18 F1 over a baseline.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[2]</a></sup> Each escalates to a stronger model only on a failed check.<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[1]</a></sup> Every 📝 step is recorded.</p>
 
     <h2>Why that one pattern earns its keep</h2>
     <p>Confidence-gated escalation isn't just tidy — it solves three problems at once:</p>

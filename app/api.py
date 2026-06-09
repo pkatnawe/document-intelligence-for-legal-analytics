@@ -14,6 +14,7 @@ OAuth compatibility.
 from __future__ import annotations
 
 import os
+import uuid
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
@@ -72,9 +73,9 @@ async def submit(file: UploadFile, bg: BackgroundTasks) -> dict:
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="empty file")
-    job = store.create(filename=file.filename)
-    bg.add_task(process_job, store, job.id, data)
-    return {"job_id": job.id, "status": job.status.value}
+    job_id = str(uuid.uuid4())  # generated here; the row is INSERTed by the worker (off the request path)
+    bg.add_task(process_job, store, job_id, data, file.filename, True)
+    return {"job_id": job_id, "status": "PENDING"}
 
 
 @app.post("/api/ingest", status_code=202)
@@ -96,9 +97,9 @@ async def ingest(file: UploadFile, bg: BackgroundTasks) -> dict:
     jobs = []
     for sp in pages:
         name = f"{base}_p{sp.index}.{ext or 'pdf'}" if len(pages) > 1 else (file.filename or "document.pdf")
-        job = store.create(filename=name)
-        bg.add_task(process_job, store, job.id, sp.pdf)
-        jobs.append({"job_id": job.id, "page": sp.index, "filename": name})
+        job_id = str(uuid.uuid4())  # the worker INSERTs the row; submit does no SQL → instant 202
+        bg.add_task(process_job, store, job_id, sp.pdf, name, True)
+        jobs.append({"job_id": job_id, "page": sp.index, "filename": name})
     return {"document": file.filename, "invoices": len(jobs), "jobs": jobs}
 
 

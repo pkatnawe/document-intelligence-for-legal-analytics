@@ -68,7 +68,7 @@ flowchart TB
     </div>
     <p style="font-size:13.5px;color:var(--mut)">Seven numbered stages: <b>ingest → keep the original → classify → extract → check → store → use.</b> The key detail is the middle: <b>classify</b> uses a cheap rules scorer and only escalates to an LLM when it's unsure, and from there <b>each document type is routed to its own extractor and schema</b> (invoice, contract, email/minutes) — that's how we handle the firm's mix of formats. Anything uncertain (unknown type, or output that fails the check) goes to <b>human review</b>, never guessed. The purple lane is the audit trail every 📝 step writes to — mostly <b>Databricks-native</b> (Delta history, Unity Catalog lineage, MLflow), so any document's full history reconstructs without us building a logging system. Detail in <a href="storage-audit.html">⑤</a>.</p>
 
-    <div class="callout"><strong>All input types — and the image-only case, handled explicitly:</strong> PDF, Word, Excel, and images all enter the same pipeline. The split that matters is <b>text layer or not</b> — digital files are read directly; <b>image-only scans and photos are rendered to a page image, OCR'd for classification, and read by the vision model for extraction</b>. "Documents that are just pictures" are a first-class path, not an afterthought.</div>
+    <div class="callout"><strong>All input types — and the image-only case, handled explicitly:</strong> PDF, Word, Excel, and images all enter the same pipeline. The split that matters is <b>text layer or not</b> — digital files are read directly; <b>image-only scans and photos are rendered to a page image, classified by type, and read by the vision model (classification-guided) — no OCR step</b>. "Documents that are just pictures" are a first-class path, not an afterthought.</div>
 
     <h2>The three things the slide has to answer</h2>
     <div class="grid3">
@@ -99,7 +99,7 @@ flowchart TB
     <p class="lead">A 2026 Nature paper proposes the same shape for multi-type document extraction — a quick sanity check that our design is sound, mapped stage by stage.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[1]</a></sup></p>
     <table>
       <tr><th>Nature reference (Li et al., 2026)</th><th>Where it lives in our pipeline</th></tr>
-      <tr><td>Image-classification module — incl. a <i>training-free keyword classifier over OCR text</i></td><td>③ Classify — our rules scorer over OCR text (decision C)</td></tr>
+      <tr><td>Image-classification module (training-free feature matching, or a small trained classifier)</td><td>③ Classify — type prediction, then a type-specific prompt; no OCR</td></tr>
       <tr><td>Classification also filters out non-target images</td><td>Our "is this an invoice?" input guard</td></tr>
       <tr><td>ICL prompt tailored to the document type</td><td>A type-specific <b>DSPy signature</b> per doc type</td></tr>
       <tr><td>LVLM inference + post-processing → structured output</td><td>④ Extract (LLM / VLM) → ⑤ validate against the schema</td></tr>

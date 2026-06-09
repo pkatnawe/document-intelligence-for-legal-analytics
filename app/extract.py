@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import dspy
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
@@ -80,29 +82,44 @@ def run_extraction(*, text: str | None = None, image_uri: str | None = None,
             return _predict(predictor, **inputs), settings.tier2_model
 
 
-def process_job(store: JobStore, job_id: str, data: bytes) -> None:
-    """Background worker: store the raw PDF -> read (text or vision) -> extract one invoice
-    -> validate -> persist. One document is one invoice (multi-invoice files are split
-    upstream in ingestion)."""
-    store.update(job_id, status=JobStatus.RUNNING)
-    store.append_audit(job_id, "RUNNING", "extraction started")
-    try:
-        filename = store.get(job_id).filename
-        source_path = store.store_document(job_id, filename, data)
-        store.update(job_id, source_path=source_path)
-        store.append_audit(job_id, "STORED", f"raw PDF retained at {source_path}")
+def _ts() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
+
+def process_job(store: JobStore, job_id: str, data: bytes, filename: str | None = None,
+                create: bool = False) -> None:
+    """Background worker: (create the job row) -> store the raw PDF -> read (text or vision)
+    -> extract one invoice -> validate -> persist. One document is one invoice (multi-invoice
+    files are split upstream in ingestion).
+
+    The API hands us a pre-generated job id and returns 202 instantly; all persistence —
+    including the initial row INSERT (`create=True`) — happens here, off the request path.
+    Status changes are written incrementally (so the polling UI updates live); the audit
+    events are buffered and written in ONE batch at the end — fewer SQL round-trips.
+    """
+    audit: list[tuple[str, str, str]] = []          # (ts, stage, detail), flushed once
+    def rec(stage: str, detail: str) -> None:
+        audit.append((_ts(), stage, detail))
+
+    if create:
+        store.create(filename, job_id=job_id)       # INSERT the row here, not on submit
+    store.update(job_id, status=JobStatus.RUNNING)
+    rec("RUNNING", "extraction started")
+    try:
+        if filename is None:
+            filename = store.get(job_id).filename
+        source_path = store.store_document(job_id, filename, data)
         doc = load_pdf(data)
-        store.update(job_id, was_scan=not doc.has_text)
+        store.update(job_id, source_path=source_path, was_scan=not doc.has_text)  # one update
+        rec("STORED", f"raw PDF retained at {source_path}")
 
         if doc.has_text:
-            store.append_audit(job_id, "READ", "text layer found -> text model")
+            rec("READ", "text layer found -> text model")
             inputs = {"text": doc.text}
         else:  # (b) image-only scan / corrupt text layer
-            n = len(doc.page_images_png)
-            store.append_audit(job_id, "READ", f"no usable text; {n} page(s) -> vision model")
             if not doc.page_images_png:
                 raise ValueError("scanned PDF produced no renderable pages")
+            rec("READ", f"no usable text; {len(doc.page_images_png)} page(s) -> vision model")
             inputs = {"image_uri": png_to_data_uri(doc.page_images_png[0])}
 
         invoice, tier = run_extraction(**inputs)
@@ -113,31 +130,31 @@ def process_job(store: JobStore, job_id: str, data: bytes) -> None:
         # review rather than storing a confident wrong answer (never a silent failure).
         warnings = reconcile(invoice)
         if warnings:
-            store.append_audit(job_id, "RECONCILE_WARNING", f"{warnings[0]}; escalating to {settings.tier2_model}")
+            rec("RECONCILE_WARNING", f"{warnings[0]}; escalating to {settings.tier2_model}")
             try:
                 inv2, tier2 = run_extraction(**inputs, premium=True)
                 if not reconcile(inv2):
                     invoice, tier, warnings = inv2, tier2, []
-                    store.append_audit(job_id, "ESCALATED", f"premium ({tier2}) reconciled")
+                    rec("ESCALATED", f"premium ({tier2}) reconciled")
             except Exception as exc:  # e.g. a text-only premium tier can't read an image (Free Edition)
-                store.append_audit(job_id, "ESCALATION_UNAVAILABLE", f"premium tier could not re-read: {exc}")
+                rec("ESCALATION_UNAVAILABLE", f"premium tier could not re-read: {exc}")
 
         store.update(job_id, status=JobStatus.SUCCEEDED, result=invoice, tier_used=tier, warnings=warnings)
         if warnings:
-            store.append_audit(job_id, "FLAGGED_FOR_REVIEW", warnings[0])
+            rec("FLAGGED_FOR_REVIEW", warnings[0])
             log.warning("job_flagged_for_review", job_id=job_id, warnings=warnings)
-        store.append_audit(
-            job_id, "SUCCEEDED",
+        rec("SUCCEEDED",
             f"{invoice.invoice_number or '(no number)'} {invoice.currency or ''} {invoice.total} via {tier}"
-            + (" [needs review]" if warnings else ""),
-        )
+            + (" [needs review]" if warnings else ""))
         log.info("job_succeeded", job_id=job_id, tier=tier, flagged=bool(warnings))
 
     except PARSE_ERRORS as exc:  # (a) still invalid after escalation -> quarantine
         store.update(job_id, status=JobStatus.FAILED, error=f"schema validation failed after escalation: {exc}")
-        store.append_audit(job_id, "FAILED", "unparseable output after re-ask + escalation (quarantined)")
+        rec("FAILED", "unparseable output after re-ask + escalation (quarantined)")
         log.warning("job_failed_schema", job_id=job_id, error=str(exc))
     except Exception as exc:  # any other failure -> recorded, never silent
         store.update(job_id, status=JobStatus.FAILED, error=str(exc))
-        store.append_audit(job_id, "FAILED", f"error: {exc}")
+        rec("FAILED", f"error: {exc}")
         log.error("job_failed", job_id=job_id, error=str(exc))
+    finally:
+        store.append_audit_many(job_id, audit)  # single write — the whole trail at once

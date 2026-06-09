@@ -7,10 +7,17 @@ business-audit layer (document state changes) lives in the job store's audit_eve
 from __future__ import annotations
 
 import logging
+import os
 
 import structlog
 
 from app.config import settings
+
+# Trace export must NEVER block the extraction worker, so export on a background queue.
+# (On Databricks Free Edition the heavy trace *attachment* upload is egress-blocked and
+# retries in the background; async keeps that off the worker thread. The core trace still
+# persists, so the model-audit layer works.) Set before mlflow is imported.
+os.environ.setdefault("MLFLOW_ENABLE_ASYNC_TRACE_LOGGING", "true")
 
 
 def configure(level: str = "INFO") -> None:
@@ -22,18 +29,25 @@ def configure(level: str = "INFO") -> None:
             structlog.processors.JSONRenderer(),
         ],
     )
+    # Tracing is opt-in via MLFLOW_EXPERIMENT (set it where the trace backend is reachable —
+    # locally or a paid workspace). When on, it records every LLM/VLM call (input, prompt,
+    # output, tokens, latency) — the model-audit layer — but asynchronously, so a slow or
+    # blocked exporter can't add to job latency.
+    if not settings.mlflow_experiment:
+        get_logger(__name__).info("mlflow_tracing_disabled")
+        return
     try:
         import mlflow
 
-        # Point traces at the workspace experiment so every model call is logged where an
-        # auditor can query it. On Databricks Apps the tracking URI is the workspace; set
-        # it explicitly so the same code traces from a laptop too.
-        if settings.mlflow_experiment:
-            mlflow.set_tracking_uri("databricks")
-            mlflow.set_experiment(settings.mlflow_experiment)
+        try:
+            mlflow.config.enable_async_logging()  # export off the worker thread
+        except Exception:
+            pass
+        mlflow.set_tracking_uri("databricks")
+        mlflow.set_experiment(settings.mlflow_experiment)
         mlflow.dspy.autolog()
-        get_logger(__name__).info("mlflow_tracing_on", experiment=settings.mlflow_experiment or "(local)")
-    except Exception as exc:  # optional locally; required for the audit layer when deployed
+        get_logger(__name__).info("mlflow_tracing_on", experiment=settings.mlflow_experiment, mode="async")
+    except Exception as exc:
         get_logger(__name__).warning("mlflow_autolog_unavailable", error=str(exc))
 
 

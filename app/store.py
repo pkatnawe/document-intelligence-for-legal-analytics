@@ -20,10 +20,13 @@ def _now() -> str:
 
 
 class JobStore(Protocol):
-    def create(self, filename: Optional[str]) -> Job: ...
+    def create(self, filename: Optional[str], job_id: Optional[str] = None) -> Job: ...
     def get(self, job_id: str) -> Optional[Job]: ...
     def update(self, job_id: str, **fields) -> None: ...
     def append_audit(self, job_id: str, stage: str, detail: str) -> None: ...
+    def append_audit_many(self, job_id: str, events: list[tuple[str, str, str]]) -> None:
+        """Append several audit events (ts, stage, detail) in one write."""
+        ...
     def get_audit(self, job_id: str) -> list[dict]:
         """Return the append-only audit events for a job, oldest first."""
         ...
@@ -40,8 +43,8 @@ class InMemoryJobStore:
         self.audit: list[tuple[str, str, str, str]] = []  # (job_id, ts, stage, detail)
         self.documents: dict[str, bytes] = {}
 
-    def create(self, filename: Optional[str]) -> Job:
-        job = Job(id=str(uuid.uuid4()), filename=filename)
+    def create(self, filename: Optional[str], job_id: Optional[str] = None) -> Job:
+        job = Job(id=job_id or str(uuid.uuid4()), filename=filename)
         self._jobs[job.id] = job
         self.append_audit(job.id, "RECEIVED", f"job created for {filename!r}")
         return job
@@ -55,6 +58,10 @@ class InMemoryJobStore:
 
     def append_audit(self, job_id: str, stage: str, detail: str) -> None:
         self.audit.append((job_id, _now(), stage, detail))
+
+    def append_audit_many(self, job_id: str, events: list[tuple[str, str, str]]) -> None:
+        for ts, stage, detail in events:
+            self.audit.append((job_id, ts, stage, detail))
 
     def get_audit(self, job_id: str) -> list[dict]:
         return [{"ts": ts, "stage": stage, "detail": detail}

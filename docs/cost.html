@@ -26,7 +26,7 @@
       <tr><td><b>1 — default</b></td><td>Gemini Flash</td><td>$0.50</td><td>$3.00</td></tr>
       <tr><td><b>2 — escalation</b></td><td>Claude Opus 4.8</td><td>$5.00</td><td>$25.00</td></tr>
     </table>
-    <p style="font-size:13px;color:var(--mut)">Classification adds ~nothing: the rules scorer is free (no model), and only the small low-confidence tail hits an LLM. OCR (Tesseract) is free/local. Embeddings for future search are a fraction of a cent per document.</p>
+    <p style="font-size:13px;color:var(--mut)">Classification adds ~nothing: the type classifier (rules on text, a lightweight image model on scans) is cheap/local, and only the small low-confidence tail hits an LLM/VLM. Embeddings for future search are a fraction of a cent per document.</p>
 
     <div class="callout"><strong>Note:</strong> these rates are the <b>production</b> tiers (Gemini / Claude). On Free Edition those are disabled, so the POC runs <b>open-weight</b> models that are included — POC token cost is effectively $0. The figures below are the paid-workspace economics the design targets.</div>
 
@@ -60,7 +60,7 @@
       <li>[1] Chen et al., <i>FrugalGPT</i>, arXiv 2305.05176 — cascades cut cost dramatically vs premium-everywhere. <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
       <li>[2] <i>Foundation Model APIs limits and quotas</i> — pay-per-token limits; provisioned throughput for production. <a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/limits" target="_blank">limits</a></li>
       <li>Public token rates (Jun 2026): Claude Opus 4.8 $5/$25 per 1M (<a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank">Claude pricing</a>); Gemini Flash ≈ $0.50/$3 per 1M. Databricks FM serving billing: <a href="https://www.databricks.com/product/pricing/foundation-model-serving" target="_blank">databricks.com</a>. Used as a defensible proxy; Databricks bills in DBUs.</li>
-      <li>Manual invoice handling ~$15–25/doc — IDP market context (per the OCR benchmark write-up referenced in <a href="concepts.html">★ Concepts</a>).</li>
+      <li>Manual invoice handling ~$15–25/doc — IDP market context (per the document-extraction research referenced in <a href="concepts.html">★ Concepts</a>).</li>
     </ol></div>
 
     <div class="pagenav">

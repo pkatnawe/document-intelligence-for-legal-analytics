@@ -69,7 +69,7 @@ flowchart TB
   classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
       </div>
       <div class="anns">
-        <div><b>Inputs:</b> PDF · Word · Excel · image — digital files read directly; <b>image-only scans → OCR for classification + vision model for extraction</b></div>
+        <div><b>Inputs:</b> PDF · Word · Excel · image — digital files read directly; <b>image-only scans → classify by type → classification-guided vision model (no OCR)</b></div>
         <div><b>Classify &amp; route:</b> a cheap rules scorer reads the text; escalate to an LLM only if unsure; then each <b>document type → its own extractor + schema</b></div>
         <div><b>Failure handling:</b> anything uncertain is escalated, then sent to a human; nothing fails silently; transient errors retry</div>
         <div><b>Scale:</b> async + Databricks Workflows + model tiering; grows to provisioned throughput at high volume</div>
@@ -98,10 +98,11 @@ flowchart TB
 flowchart TB
   A["📥 PDF · Word · Excel · image"]:::io --> TL{"Text layer?"}:::dec
   TL -->|"yes — digital"| TX["📖 Read the text"]:::n
-  TL -->|"no — scan / image 🖼️ ⓑ"| OCR["🖼️ Page image → vision model<br/>ⓑ image-only scan"]:::n
-  TX & OCR --> SC["📋 Rules scorer<br/>keywords + structure + metadata"]:::n
+  TL -->|"no — scan / image 🖼️ ⓑ"| IMG["🖼️ Page image (no OCR)<br/>ⓑ image-only scan"]:::n
+  TX --> SC["📋 Classify type<br/>rules on text · image classifier on scans"]:::n
+  IMG --> SC
   SC --> C{"confident? 📝"}:::dec
-  C -->|"not sure"| CL["🧠 LLM zero-shot classify"]:::llm --> C2{"confident? 📝"}:::dec
+  C -->|"not sure"| CL["🧠 LLM/VLM classify"]:::llm --> C2{"confident? 📝"}:::dec
   C2 -->|"no"| UNK["🚩 Unknown → human 📝"]:::err
   C -->|"yes ~90%"| RT{{"route by type"}}:::route
   C2 -->|"yes"| RT
@@ -125,7 +126,7 @@ flowchart TB
   classDef retry fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
       </div>
       <div class="anns">
-        <div><b>All input types:</b> PDF / Word / Excel / image → digital files read directly; <b>image-only scans → page image + OCR</b>, then extracted by the <b>vision model</b></div>
+        <div><b>All input types:</b> PDF / Word / Excel / image → digital files read directly; <b>image-only scans → page image → classify → classification-guided vision model</b> (no OCR — preserves layout)</div>
         <div><b>Classify &amp; route:</b> rules scorer → escalate to an LLM if unsure → each <b>type routed to its own extractor + schema</b>; non-invoices caught here</div>
         <div><b>3 failure cases:</b> ⓐ bad schema → re-ask → escalate → human · ⓑ scan → VLM · ⓒ flaky API → retry</div>
         <div><b>Store → use:</b> Silver/Gold feed reporting, search, summarization, aggregation</div>
