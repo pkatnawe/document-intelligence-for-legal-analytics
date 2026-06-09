@@ -73,14 +73,17 @@ flowchart TB
   B -->|yes| C["📖 Read text → fast model"]:::n
   B -->|"no — it's a scan (ⓑ)"| D["🖼️ Read image → vision model"]:::n
   C & D --> E{"✅ Fits the schema? (ⓐ)"}:::dec
-  E -->|yes| S[("💾 Save it 📝")]:::d
-  E -->|"no"| FIX["🔁 Re-ask once,<br/>then a stronger model"]:::llm --> E2{"✅ Now?"}:::dec
-  E2 -->|yes| S
-  E2 -->|"still no"| H["🚩 Flag for a human 📝"]:::err
-  RETRY[["ⓒ transient API error → retry with backoff<br/>(deterministic errors are NOT retried)"]]:::retry
+  E -->|"no → re-ask, escalate"| FIX["🧠 stronger model"]:::llm --> E
+  E -->|yes| R{"➗ Line items reconcile<br/>with the total?"}:::dec
+  R -->|yes| S[("💾 Save it 📝")]:::d
+  R -->|"no → escalate"| FIX2["🧠 stronger model"]:::llm --> R2{"✅ reconciles now?"}:::dec
+  R2 -->|yes| S
+  R2 -->|"no"| H["🚩 Human review 📝<br/>— the final step"]:::err
+  RETRY[["ⓒ every model call retries on<br/>transient API errors (backoff)"]]:::retry
   C -.-> RETRY
   D -.-> RETRY
   FIX -.-> RETRY
+  FIX2 -.-> RETRY
   classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
   classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
   classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
@@ -88,13 +91,15 @@ flowchart TB
   classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
   classDef retry fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
     </div>
-    <p style="font-size:13.5px;color:var(--mut)">A PDF either has selectable text (read it) or it's a scan (send the image to the vision model — case ⓑ). Either way the result is checked against the schema (ⓐ); if it doesn't fit, we re-ask once, then escalate to a stronger model, and only then flag for a human. Flaky API calls retry with a short back-off (ⓒ). Both outcomes — saved or flagged — are 📝 recorded.</p>
+    <p style="font-size:13.5px;color:var(--mut)">A PDF either has selectable text (read it) or it's a scan (send the image to the vision model — case ⓑ). The result clears <b>two gates</b>: it must fit the schema (ⓐ — re-ask, then escalate), <i>and</i> its line items must reconcile with the total (a correctness check, since a weak model can return a well-typed but wrong number). A failure at either gate escalates to a stronger model; if that still doesn't resolve, the document is <b>flagged for a human — the final step</b>. Flaky API calls retry with back-off (ⓒ). Every outcome — saved or flagged — is 📝 recorded.</p>
     <table>
-      <tr><th></th><th>Case requirement</th><th>How it's handled</th></tr>
-      <tr><td><b>ⓐ</b></td><td>Output won't fit the schema</td><td>Validate → re-ask once → escalate to the stronger model → flag for a human. Every step recorded.</td></tr>
+      <tr><th></th><th>Case requirement</th><th>How it's handled — ending in a human</th></tr>
+      <tr><td><b>ⓐ</b></td><td>Output won't fit the schema</td><td>Validate → re-ask once → escalate to the stronger model → <b>flag for a human</b>. Every step recorded.</td></tr>
       <tr><td><b>ⓑ</b></td><td>Image-only scan, no text</td><td>Detect missing text layer → send the page image to the VLM (no OCR needed in code).</td></tr>
       <tr><td><b>ⓒ</b></td><td>Flaky LLM API</td><td>Retry with exponential backoff, on transient errors only; on exhaustion, fail + record.</td></tr>
+      <tr><td><b>+</b></td><td>Well-typed but <i>wrong</i></td><td>Line-items-vs-total reconciliation → escalate → <b>flag for a human</b> (never a silent wrong answer).</td></tr>
     </table>
+    <div class="callout win"><strong>The final step is always a human.</strong> Nothing the system can't handle with confidence is dropped or guessed — it's escalated to a stronger model and, failing that, routed to a person, with every decision on the audit trail. For a legal client, a flagged uncertainty is safe; a silent fabrication is not.</div>
 
     <div class="callout"><strong>Slide vs code:</strong> the top diagram is the full platform; the zoom-in is the lean invoice service. No classifier or OCR ships in the code — see the <a href="task2-service.html">⑨ scope boundary</a>.</div>
 
