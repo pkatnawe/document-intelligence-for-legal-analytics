@@ -31,6 +31,27 @@
     <p>The service assumes <b>one PDF = one invoice</b>. The case dataset breaks that assumption: it's a single PDF holding <b>three unrelated invoices</b> — Uber, WeWork, Cargo — one per page, and <b>none have a usable text layer</b> (one is an image, one a dark scan, one a corrupt/encoded text layer). Splitting is an <b>ingestion concern</b>, kept out of the extraction service: <code>splitter.py</code> bursts the file into one single-page PDF per page, and each becomes an independent job with its own retained document and audit trail.</p>
     <p style="font-size:13px;color:var(--mut)">Why split upstream instead of looping pages inside the service? It keeps the service contract clean (one job → one invoice → one result), gives every invoice its own audit trail and stored artifact, and mirrors where the work belongs on the platform — alongside format conversion and classification in ingestion.</p>
 
+    <h2>Reading the document (case ⓑ) — the options, and why no OCR</h2>
+    <p>Case ⓑ is "PDFs with no embedded text layer (image-only scans)." Handling it has two parts: <b>detect</b> that there's no usable text, then <b>read</b> the page anyway. We considered three ways and built the third.</p>
+    <table>
+      <tr><th>Option</th><th>How it reads a scan</th><th>Verdict</th></tr>
+      <tr><td>OCR-first (Tesseract)</td><td>Transcribe the image to text with OCR, then run the text model</td><td>Rejected for the service — adds a system binary (Tesseract/poppler), and OCR is lossy on seals/low-contrast/odd fonts (the research confirms degraded-doc failure)</td></tr>
+      <tr><td>One model for everything</td><td>Send every page image to the VLM, no detection</td><td>Rejected — wastes the vision model (and tokens) on clean digital PDFs that already have perfect text</td></tr>
+      <tr><td><b>Text-layer check → VLM</b> (built)</td><td>Cheaply detect whether real text exists; if not, send the page <i>image</i> to the vision model — which reads layout directly, no OCR step</td><td><b>Chosen</b> — no external binary, the VLM beats OCR on messy scans, and clean PDFs skip the model entirely</td></tr>
+    </table>
+    <p><b>The detection is a text-layer check, not OCR.</b> OCR turns an image <i>into</i> text; we instead ask the PDF whether it already carries text. <code>loader.py</code> calls PyMuPDF's <code>get_text()</code> and then judges whether the result is <i>usable</i> — not merely present:</p>
+    <ul>
+      <li><b>Length gate:</b> at least ~20 non-whitespace characters (a true scan returns <code>""</code> → fails here).</li>
+      <li><b>Printable-ratio gate:</b> ≥60% of the characters must be ones a real invoice uses (letters, digits, <code>$ . , : / % -</code>…). This is what catches the case dataset: its text layer isn't empty — it's a <b>corrupt/encoded font</b> that returns control characters like <code>\x02\x05\x01</code>, so the ratio is far below 0.6 and it's correctly routed to the image path.</li>
+    </ul>
+    <table>
+      <tr><th><code>get_text()</code> returns</th><th>length ≥ 20</th><th>≥ 60% printable</th><th>route</th></tr>
+      <tr><td>clean invoice text</td><td>✓</td><td>✓</td><td>text model</td></tr>
+      <tr><td><code>""</code> (true scan)</td><td>✗</td><td>—</td><td>vision model (ⓑ)</td></tr>
+      <tr><td><code>\x02\x05…</code> (garbled font)</td><td>✓</td><td>✗</td><td>vision model (ⓑ)</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">Then the page is rendered to PNG (PyMuPDF, 200 dpi) and the densest page leads, so a blank cover never wins. The thresholds (20 chars, 0.6 ratio, 200 dpi) are heuristics tuned for invoices — exactly what we'd validate against the firm's real document mix. Note: the platform slides list OCR as one option for the <i>classification</i> stage; the built service skips OCR entirely.</p>
+
     <h2>The async API — why it's shaped this way</h2>
     <p>Extraction takes seconds, so a normal blocking request would hold the connection open and time out under load. Instead: <b>POST returns a job id immediately</b> (202), the work runs on a background worker, and the client <b>polls a second endpoint</b> for the result. User-facing latency becomes the time to accept the upload, not the time to extract.</p>
     <div class="mermaid">
@@ -54,6 +75,19 @@ sequenceDiagram
   Note over S: 📝 every step is an append-only audit event
     </div>
     <p style="font-size:13.5px;color:var(--mut)">The client never waits — it gets a job id instantly and checks back later. Every status change (📝) is written to Delta, so progress survives a restart and the whole history is auditable; an in-memory dict would lose every in-flight job on redeploy.</p>
+
+    <h2>The endpoints</h2>
+    <p>Six routes (<code>api.py</code>). The two the case asks for are <b>submit</b> and <b>poll</b>; the rest are the upload UI, the audit read, and a health check. Behind Databricks Apps OAuth, the browser UI calls these same-origin (no token); scripts pass a bearer token.</p>
+    <table>
+      <tr><th>Method · path</th><th>Does</th><th>Returns</th></tr>
+      <tr><td><code>POST /api/ingest</code></td><td><b>Ingestion entry point.</b> Reads the PDF, splits it into one single-invoice document per page (blank pages dropped), creates a job per page, and queues each on a background worker</td><td><b>202</b> · <code>{document, invoices, jobs:[{job_id, page, filename}]}</code> — instantly, before any extraction</td></tr>
+      <tr><td><code>POST /api/extract</code></td><td>Same async contract for a <b>single already-single-invoice</b> PDF (one job, no split) — used by the CLI</td><td><b>202</b> · <code>{job_id, status}</code></td></tr>
+      <tr><td><code>GET /api/jobs/{id}</code></td><td><b>Poll.</b> The job's current state; once done, the extracted <code>Invoice</code></td><td><b>200</b> · the full job (<code>status, was_scan, tier_used, source_path, result, error</code>) · <b>404</b> if unknown</td></tr>
+      <tr><td><code>GET /api/jobs/{id}/audit</code></td><td>The append-only <b>audit trail</b> for the job, plus where its artifacts live</td><td><b>200</b> · <code>{events:[{ts, stage, detail}], stored_in:{jobs_table, audit_table, volume}}</code></td></tr>
+      <tr><td><code>GET /</code></td><td>The minimal <b>upload UI</b> (drag a PDF, watch the lifecycle + audit trail)</td><td><b>200</b> · HTML</td></tr>
+      <tr><td><code>GET /healthz</code></td><td>Liveness probe</td><td><b>200</b> · <code>{status:"ok"}</code></td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">A job moves <code>PENDING → RUNNING → SUCCEEDED</code> (or <code>FAILED</code>), and every transition is an audit event — so the poll endpoint answers "what's the status" and the audit endpoint answers "what happened, step by step, and where is it stored."</p>
 
     <h2>The LLM layer — DSPy</h2>
     <p>One typed object is both the model interface and the validation contract. The <code>Invoice</code> Pydantic model is the single source of truth, shared by the signature and the validator — and tiering (fast default, escalate on failure) is a couple of lines. Field optionality is set by what <b>real</b> invoices carry: only <code>total</code> is required (an Uber receipt has no invoice number).</p>

@@ -1,8 +1,11 @@
 """FastAPI service — the async extraction contract.
 
-POST /api/extract  -> accepts a PDF, returns a job id immediately (HTTP 202).
-GET  /api/jobs/{id} -> returns job status, and the result once complete.
-GET  /              -> health check.
+  GET  /                    -> the upload UI (HTML)
+  GET  /healthz             -> liveness check
+  POST /api/ingest          -> accept a PDF, split into 1 job per invoice, return ids (202)
+  POST /api/extract         -> accept a single-invoice PDF, return one job id (202)
+  GET  /api/jobs/{id}       -> job status, and the extracted invoice once complete
+  GET  /api/jobs/{id}/audit -> the append-only audit trail + where artifacts are stored
 
 The slow extraction runs on a background worker, so user-facing latency is the time to
 accept the upload, not the time to extract. Routes are under /api for Databricks Apps
