@@ -92,17 +92,16 @@ def process_job(store: JobStore, job_id: str, data: bytes, filename: str | None 
     -> extract one invoice -> validate -> persist. One document is one invoice (multi-invoice
     files are split upstream in ingestion).
 
-    The API hands us a pre-generated job id and returns 202 instantly; all persistence —
-    including the initial row INSERT (`create=True`) — happens here, off the request path.
-    Status changes are written incrementally (so the polling UI updates live); the audit
-    events are buffered and written in ONE batch at the end — fewer SQL round-trips.
+    The API hands us a pre-generated job id and returns 202 instantly. Live state (status +
+    audit) is written to the store's in-memory cache, so the polling UI updates instantly and
+    never waits on the serverless SQL warehouse. The single durable write to Delta + the UC
+    Volume happens in `store.flush()` at the very end — off the user-facing path.
     """
-    audit: list[tuple[str, str, str]] = []          # (ts, stage, detail), flushed once
     def rec(stage: str, detail: str) -> None:
-        audit.append((_ts(), stage, detail))
+        store.append_audit(job_id, stage, detail)   # live to the cache; flushed to Delta at the end
 
     if create:
-        store.create(filename, job_id=job_id)       # INSERT the row here, not on submit
+        store.create(filename, job_id=job_id)       # row exists in the cache immediately (no 404 window)
     store.update(job_id, status=JobStatus.RUNNING)
     rec("RUNNING", "extraction started")
     try:
@@ -157,4 +156,6 @@ def process_job(store: JobStore, job_id: str, data: bytes, filename: str | None 
         rec("FAILED", f"error: {exc}")
         log.error("job_failed", job_id=job_id, error=str(exc))
     finally:
-        store.append_audit_many(job_id, audit)  # single write — the whole trail at once
+        # The UI already reflects the final state from the cache; now persist durably
+        # (UC Volume + one Delta job-row INSERT + the audit trail) off the user-facing path.
+        store.flush(job_id, data, filename)

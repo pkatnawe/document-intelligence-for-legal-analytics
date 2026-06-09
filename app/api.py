@@ -25,6 +25,7 @@ from app.extract import process_job
 from app.llm import client
 from app.observability import configure as configure_logging
 from app.observability import get_logger
+from app.store import CachingJobStore
 from app.store_delta import DeltaJobStore
 from app.web import UPLOAD_PAGE
 
@@ -32,16 +33,19 @@ log = get_logger(__name__)
 app = FastAPI(title="Invoice Extraction Service", version="1.0")
 
 
-def _make_store() -> DeltaJobStore:
-    """The runtime store is Delta / Unity Catalog. Jobs, the append-only audit trail, and
-    the retained raw PDFs all live in one UC schema; nothing is kept on local disk."""
+def _make_store() -> CachingJobStore:
+    """The durable store is Delta / Unity Catalog — jobs, the append-only audit trail, and the
+    retained raw PDFs all live in one UC schema. We wrap it in a write-behind cache so the
+    polling UI is served from memory (instant) and the slow warehouse writes happen once at
+    the end of each job, off the request path."""
     warehouse, catalog = os.environ.get("WAREHOUSE_ID"), os.environ.get("UC_CATALOG")
     if not (warehouse and catalog):
         raise RuntimeError(
             "Delta store not configured: set WAREHOUSE_ID and UC_CATALOG (see .env.example). "
             "On Databricks Apps these come from the app resources."
         )
-    return DeltaJobStore(warehouse, catalog, os.environ.get("UC_SCHEMA", "invoice_poc"))
+    delta = DeltaJobStore(warehouse, catalog, os.environ.get("UC_SCHEMA", "invoice_poc"))
+    return CachingJobStore(delta)
 
 
 store = _make_store()

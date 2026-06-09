@@ -112,6 +112,31 @@ class DeltaJobStore:
         self.append_audit(job.id, "RECEIVED", f"job created for {filename}")
         return job
 
+    def persist(self, job: Job) -> None:
+        """Write a job's FINAL state in a single INSERT — used by the write-behind cache,
+        which serves the live UI from memory and persists to Delta once at the end (one
+        round-trip instead of an INSERT + several UPDATEs through the serverless warehouse)."""
+        self._exec(
+            f"""INSERT INTO {self.jobs}
+                (id,status,filename,created_at,updated_at,was_scan,source_path,tier_used,
+                 result_json,warnings_json,error)
+                VALUES(:id,:status,:filename,:created_at,:updated_at,:was_scan,:source_path,
+                       :tier_used,:result_json,:warnings_json,:error)""",
+            params={
+                "id": job.id, "status": job.status.value, "filename": job.filename,
+                "created_at": job.created_at, "updated_at": job.updated_at,
+                "was_scan": job.was_scan, "source_path": job.source_path,
+                "tier_used": job.tier_used,
+                "result_json": job.result.model_dump_json() if job.result else None,
+                "warnings_json": json.dumps(job.warnings) if job.warnings else None,
+                "error": job.error,
+            },
+        )
+
+    def doc_path(self, job_id: str, filename: Optional[str]) -> str:
+        """The volume path a job's raw PDF will live at — computed without any upload."""
+        return f"{self.volume_root}/{job_id}/{filename or 'document.pdf'}"
+
     def get(self, job_id: str) -> Optional[Job]:
         rows = self._exec(
             "SELECT id,status,filename,created_at,updated_at,was_scan,source_path,tier_used,"

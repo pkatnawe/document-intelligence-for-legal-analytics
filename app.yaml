@@ -22,14 +22,16 @@ env:
   - name: TIER2_MODEL
     value: "databricks-meta-llama-3-3-70b-instruct"
 
-  # MLflow tracing (model-audit layer) — records every LLM/VLM call with its input, output,
-  # tokens, latency, and state. Kept ON; exported ASYNC and fail-fast so it never adds to job
-  # latency. On Free Edition the core trace still exports fine; only the heavy image
-  # *attachment* upload is egress-blocked (works fully on a paid workspace).
-  - name: MLFLOW_EXPERIMENT
-    value: "/Users/pkatnawe@uwo.ca/Invoice-Extraction"
-  - name: MLFLOW_ENABLE_ASYNC_TRACE_LOGGING
-    value: "true"
+  # MLflow tracing (the model-audit layer) records every LLM/VLM call with its input, output,
+  # tokens, latency, and state. It is turned OFF on the deployed Free-Edition app on purpose:
+  # Free Edition blocks the egress MLflow needs to upload trace data, so a live exporter only
+  # adds latency and noise here. The traces shown in the demo are captured by a *local* run
+  # (egress open) into the `Invoice-Extraction` experiment; on a paid workspace you simply set
+  # MLFLOW_EXPERIMENT below and tracing runs live with no egress limit. To re-enable, uncomment:
+  # - name: MLFLOW_EXPERIMENT
+  #   value: "/Users/pkatnawe@uwo.ca/Invoice-Extraction"
+  # - name: MLFLOW_ENABLE_ASYNC_TRACE_LOGGING
+  #   value: "true"
 
   # Delta-backed store (Unity Catalog) via a serverless SQL warehouse.
   - name: WAREHOUSE_ID
