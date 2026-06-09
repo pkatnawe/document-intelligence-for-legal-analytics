@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⑨ Service (Part 2)</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Built · Part 2</div>
+    <h1>Extraction Service <span class="b decided">built · deployed on Databricks Apps</span></h1>
+    <p class="lead">A backend service that extracts header + line-items from PDF invoices behind an async API, with the upload UI, the three required failure cases, and Unity-Catalog persistence (Delta + Volume + audit trail). Running live on Databricks Apps and verified end-to-end against the case dataset.</p>
+
+    <div class="callout"><b>Live:</b> <code>invoice-extractor-3508475445691634.aws.databricksapps.com</code> (behind Databricks OAuth). Upload a PDF and watch the job id return instantly, the status step through <i>Reading → Extracting → Stored</i>, the audit trail fill in, and the extracted invoice appear.</div>
+
+    <h2>The line we hold: code vs slides</h2>
+    <p>The rubric rewards judgment, not completeness — so the service stays focused while the platform breadth lives on the slides.</p>
+    <table>
+      <tr><th>In the code (built)</th><th>On the slides only</th></tr>
+      <tr><td>PDF load + text-layer check; render scan → VLM</td><td>Multi-format ingest (Word/Excel/email)</td></tr>
+      <tr><td>Ingestion <b>splitter</b>: multi-invoice PDF → single-invoice docs</td><td>Full classification + OCR ladder</td></tr>
+      <tr><td>DSPy typed extraction + the 3 failure cases</td><td>Full medallion data model</td></tr>
+      <tr><td>Async API + upload UI + Delta/Volume/audit + MLflow</td><td>Vector search, CI/CD, Workflows scaling</td></tr>
+    </table>
+
+    <h2>One document = one invoice — and the splitter</h2>
+    <p>The service assumes <b>one PDF = one invoice</b>. The case dataset breaks that assumption: it's a single PDF holding <b>three unrelated invoices</b> — Uber, WeWork, Cargo — one per page, and <b>none have a usable text layer</b> (one is an image, one a dark scan, one a corrupt/encoded text layer). Splitting is an <b>ingestion concern</b>, kept out of the extraction service: <code>splitter.py</code> bursts the file into one single-page PDF per page, and each becomes an independent job with its own retained document and audit trail.</p>
+    <p style="font-size:13px;color:var(--mut)">Why split upstream instead of looping pages inside the service? It keeps the service contract clean (one job → one invoice → one result), gives every invoice its own audit trail and stored artifact, and mirrors where the work belongs on the platform — alongside format conversion and classification in ingestion.</p>
+
+    <h2>The async API — why it's shaped this way</h2>
+    <p>Extraction takes seconds, so a normal blocking request would hold the connection open and time out under load. Instead: <b>POST returns a job id immediately</b> (202), the work runs on a background worker, and the client <b>polls a second endpoint</b> for the result. User-facing latency becomes the time to accept the upload, not the time to extract.</p>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client / UI
+  participant API as FastAPI
+  participant S as Delta + Volume
+  participant W as Worker
+  participant FM as Model
+  C->>API: POST /api/extract (PDF)
+  API->>S: create job (PENDING) 📝
+  API-->>C: 202 {job_id}  ⏎ instant
+  API->>W: run in background
+  W->>S: store raw PDF → Volume 📝
+  W->>FM: extract (text or vision)
+  W->>S: SUCCEEDED + result 📝
+  C->>API: GET /api/jobs/{id} (poll)
+  API-->>C: status + invoice
+  C->>API: GET /api/jobs/{id}/audit
+  API-->>C: full audit trail
+  Note over S: 📝 every step is an append-only audit event
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">The client never waits — it gets a job id instantly and checks back later. Every status change (📝) is written to Delta, so progress survives a restart and the whole history is auditable; an in-memory dict would lose every in-flight job on redeploy.</p>
+
+    <h2>The LLM layer — DSPy</h2>
+    <p>One typed object is both the model interface and the validation contract. The <code>Invoice</code> Pydantic model is the single source of truth, shared by the signature and the validator — and tiering (fast default, escalate on failure) is a couple of lines. Field optionality is set by what <b>real</b> invoices carry: only <code>total</code> is required (an Uber receipt has no invoice number).</p>
+    <div class="tabs" data-grp="dspy">
+      <div class="tab active" data-t="sig">schema + signature</div>
+      <div class="tab" data-t="run">extract.py (the cascade)</div>
+      <div class="tab" data-t="layout">module layout</div>
+    </div>
+    <div class="code" data-grp="dspy">
+    <pre data-c="sig"><code><span class="kw">class</span> <span class="nm">LineItem</span>(BaseModel):
+    description: <span class="nm">str</span>; amount: <span class="nm">float</span>
+    quantity: Optional[<span class="nm">float</span>] = <span class="nm">None</span>; unit_price: Optional[<span class="nm">float</span>] = <span class="nm">None</span>
+
+<span class="kw">class</span> <span class="nm">Invoice</span>(BaseModel):              <span class="cm"># the validation contract (case ⓐ)</span>
+    invoice_number: Optional[<span class="nm">str</span>] = <span class="nm">None</span>   <span class="cm"># ride receipts (Uber) have none</span>
+    invoice_date: Optional[<span class="nm">str</span>] = <span class="nm">None</span>
+    vendor: Optional[<span class="nm">str</span>] = <span class="nm">None</span>         <span class="cm"># involved parties the brief calls out</span>
+    bill_to: Optional[<span class="nm">str</span>] = <span class="nm">None</span>
+    currency: Optional[<span class="nm">str</span>] = <span class="nm">None</span>
+    subtotal: Optional[<span class="nm">float</span>] = <span class="nm">None</span>; tax: Optional[<span class="nm">float</span>] = <span class="nm">None</span>
+    total: <span class="nm">float</span> = <span class="fn">Field</span>(ge=<span class="nm">0</span>)         <span class="cm"># the one amount every invoice has</span>
+    payment_method: Optional[<span class="nm">str</span>] = <span class="nm">None</span>
+    line_items: <span class="nm">list</span>[LineItem] = []
+
+<span class="kw">class</span> <span class="nm">ExtractInvoice</span>(dspy.Signature):  <span class="cm"># text front-end</span>
+    document_text: <span class="nm">str</span> = dspy.<span class="fn">InputField</span>()
+    invoice: Invoice = dspy.<span class="fn">OutputField</span>()
+<span class="kw">class</span> <span class="nm">ExtractInvoiceVision</span>(dspy.Signature):  <span class="cm"># image front-end (case ⓑ)</span>
+    page_image: dspy.Image = dspy.<span class="fn">InputField</span>()
+    invoice: Invoice = dspy.<span class="fn">OutputField</span>()</code></pre>
+    <pre data-c="run" hidden><code><span class="cm"># speed-first tiering: fast default, escalate only when needed</span>
+FAST    = dspy.<span class="fn">LM</span>(<span class="st">"databricks/databricks-gemma-3-12b"</span>)               <span class="cm"># tier-1 (vision)</span>
+PREMIUM = dspy.<span class="fn">LM</span>(<span class="st">"databricks/databricks-meta-llama-3-3-70b-instruct"</span>) <span class="cm"># tier-2</span>
+
+<span class="nm">@retry</span>(retry=<span class="fn">retry_if_exception_type</span>(TRANSIENT_ERRORS),  <span class="cm"># ⓒ transient ONLY (not parse errors)</span>
+       stop=<span class="fn">stop_after_attempt</span>(<span class="nm">3</span>), wait=<span class="fn">wait_exponential</span>(min=<span class="nm">1</span>, max=<span class="nm">10</span>))
+<span class="kw">def</span> <span class="fn">_predict</span>(predictor, **inputs) -> Invoice: <span class="kw">return</span> predictor(**inputs).invoice
+
+<span class="kw">def</span> <span class="fn">run_extraction</span>(text=<span class="nm">None</span>, image_uri=<span class="nm">None</span>):
+    predictor, inputs = (vision, image) <span class="kw">if</span> image_uri <span class="kw">else</span> (textmodel, text)
+    <span class="kw">try</span>:
+        <span class="kw">return</span> <span class="fn">_predict</span>(predictor, **inputs), TIER1
+    <span class="kw">except</span> AdapterParseError:               <span class="cm"># ⓐ won't fit schema → escalate to premium</span>
+        <span class="kw">with</span> dspy.<span class="fn">context</span>(lm=PREMIUM):           <span class="cm"># premium also fails → raises → job FAILED (quarantined)</span>
+            <span class="kw">return</span> <span class="fn">_predict</span>(predictor, **inputs), TIER2</code></pre>
+    <pre data-c="layout" hidden><code>app/
+├─ documents/loader.py    <span class="cm"># text-layer check; render page if scan (ⓑ)</span>
+├─ documents/splitter.py  <span class="cm"># ingestion preprocess: multi-invoice PDF → docs</span>
+├─ llm/signatures.py      <span class="cm"># DSPy signatures (text + vision) — the model layer</span>
+├─ llm/client.py          <span class="cm"># DSPy ↔ Databricks serving endpoints; model tiers</span>
+├─ validation/schema.py   <span class="cm"># Pydantic Invoice — single source of truth</span>
+├─ extract.py             <span class="cm"># orchestration: cascade + the 3 failure paths</span>
+├─ store_delta.py         <span class="cm"># Delta + UC Volume store (bound-param SQL)</span>
+├─ store.py               <span class="cm"># JobStore Protocol + in-memory test double</span>
+├─ observability.py       <span class="cm"># structlog + mlflow.dspy.autolog → experiment</span>
+├─ web.py                 <span class="cm"># the upload UI served at /</span>
+└─ api.py                 <span class="cm"># FastAPI: /api/extract, /api/jobs/{id}, /audit</span></code></pre>
+    </div>
+    <p style="font-size:13.5px"><b>The three required failures, mapped:</b> <b>ⓐ</b> bad output → DSPy re-asks, escalate to premium, then fail cleanly (job <code>FAILED</code>, quarantined); <b>ⓑ</b> image-only / corrupt-text scan → text-layer check → VLM; <b>ⓒ</b> flaky API → retry with backoff (parse errors are <i>not</i> retried). MLflow autolog traces every call for the model-audit layer.</p>
+
+    <h2>Storage &amp; audit — everything in Unity Catalog</h2>
+    <p>Three artifacts per job, one UC schema (<code>workspace.invoice_poc</code>):</p>
+    <table>
+      <tr><th>Artifact</th><th>Where</th><th>Why</th></tr>
+      <tr><td>Job + extracted result</td><td>Delta table <code>jobs</code></td><td>queryable status + structured result</td></tr>
+      <tr><td>Every state change</td><td>Delta table <code>audit_events</code> (append-only)</td><td>the who/what/when audit trail</td></tr>
+      <tr><td>The original PDF</td><td>UC <b>Volume</b> <code>documents</code></td><td>retain the source for legal review</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">SQL uses <b>bound parameters</b>, not string interpolation — correct for JSON with embedded newlines (an address line that broke a naive inline literal) and injection-safe. The <code>JobStore</code> Protocol is the swap point: at high poll volume, job status moves to a transactional store while Delta keeps the append-only audit + results. <code>DESCRIBE HISTORY</code> on the Delta tables gives a versioned audit primitive for free.</p>
+
+    <h2>Verified end-to-end (2026-06-09)</h2>
+    <p>The case dataset, split into 3 single-invoice PDFs and run through the <b>deployed</b> app — all routed to the vision path (no usable text layer):</p>
+    <table>
+      <tr><th>Invoice</th><th>Number</th><th>Total</th><th>Path</th></tr>
+      <tr><td>Uber ride receipt</td><td>—</td><td>CA$ (9 line items)</td><td>vision · gemma-3-12b</td></tr>
+      <tr><td>WeWork</td><td>PXC7PUAWY2HY-1</td><td>CA$36.75</td><td>vision · gemma-3-12b</td></tr>
+      <tr><td>Cargo Collective</td><td>2011981</td><td>$99 USD</td><td>vision · gemma-3-12b</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">Each produced a 5-event trail (<code>RECEIVED → RUNNING → STORED → READ → SUCCEEDED</code>) with the result + retained PDF in Unity Catalog. On Free Edition the proprietary models are disabled, so the POC uses open-weight models; production swaps the tiers back to Gemini/Claude with one env change.</p>
+
+    <h2>Anticipated questions</h2>
+    <div class="qa">
+      <p><b>Q. Why split the multi-invoice PDF outside the service instead of extracting every page?</b><br>
+      To keep the service contract honest — one document, one invoice, one result, one audit trail. A page loop would entangle "is this one invoice or several?" with extraction; on the platform that grouping decision belongs in ingestion next to classification. The splitter is ~30 lines and each split doc is independently retried, stored, and audited.</p>
+      <p><b>Q. The dataset's text layer looked fine — why vision?</b><br>
+      Its text layer is corrupt/encoded (custom glyph encoding → garbled bytes), and the other pages are images. A printable-character ratio check detects "no usable text" and routes to the VLM — the same path a true scan takes (case ⓑ). This is more robust than trusting that any text layer is good.</p>
+      <p><b>Q. How is failure case (a) actually triggered if most fields are optional?</b><br>
+      DSPy coerces the model output to the <code>Invoice</code> type and raises <code>AdapterParseError</code> on a mismatch — a missing <code>total</code>, a non-numeric amount, a negative total, or malformed JSON. We re-ask on the fast model, escalate to premium, and only then mark the job <code>FAILED</code> (quarantined) — never a silent bad row.</p>
+      <p><b>Q. Why retry only some errors?</b><br>
+      Only <i>transient</i> errors (connection, timeout, rate-limit, 5xx) are retried with exponential backoff. A schema-parse error is deterministic — retrying the same prompt won't help, so it escalates the model tier instead. Retrying deterministic failures just burns latency and tokens.</p>
+      <p><b>Q. How does this scale to large document volumes?</b><br>
+      The async contract means the API only does upload + enqueue; extraction is a worker concern that scales horizontally (in production, a queue + worker pool / Databricks Workflows). Delta holds results and the append-only audit; at high poll volume, job-status reads move to a transactional store behind the same <code>JobStore</code> interface — no service change.</p>
+      <p><b>Q. Where's the audit trail, and is it tamper-evident?</b><br>
+      Two layers: a business-audit <code>audit_events</code> table (append-only, every state change) and a model-audit layer (MLflow autolog traces every model call). Both live in Unity Catalog with its access controls and lineage; Delta <code>DESCRIBE HISTORY</code> adds versioned who/what/when. The UI surfaces the trail live.</p>
+      <p><b>Q. Free Edition uses weaker models — is that a problem?</b><br>
+      It's a config choice, not a code one. Free Edition disables Gemini/Claude, so the POC runs open-weight <code>gemma-3-12b</code> / <code>llama-3-3-70b</code>. They're imperfect on noisy receipts (e.g. an Uber total mis-read) — exactly what the premium tier-2 and human-review escalation exist for. A paid workspace swaps the tiers back with one env var; the pipeline is identical.</p>
+    </div>
+
+    <div class="sources"><b>Sources / to verify against installed versions</b><ol>
+      <li>DSPy coerces output via <code>TypeAdapter</code> and raises <code>AdapterParseError</code> on a bad parse (not raw <code>pydantic.ValidationError</code>) — confirm the symbol + transient exception types for your DSPy/SDK versions. <a href="https://dspy.ai/learn/programming/signatures/" target="_blank">dspy.ai</a></li>
+      <li><code>mlflow.dspy.autolog()</code> + <code>set_tracking_uri("databricks")</code> + <code>set_experiment(...)</code> is the current tracing setup. <a href="https://docs.databricks.com/aws/en/mlflow3/genai/tracing/integrations/dspy" target="_blank">databricks docs</a></li>
+      <li>Databricks Apps inject the service-principal OAuth; force <code>DATABRICKS_AUTH_TYPE=pat</code> to use a PAT without the dual-auth error. SQL via the Statement Execution API with bound parameters. <a href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/" target="_blank">apps docs</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="decisions.html">← ⑧ Decisions &amp; Open Qs</a>
+      <a href="index.html">⌂ Overview</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

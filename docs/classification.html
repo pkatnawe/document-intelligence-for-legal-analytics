@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>④ Classification</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Part 1 · Architecture</div>
+    <h1>Classification</h1>
+    <p class="lead">Before the system can extract anything, it has to know what it is looking at — invoice, contract, email, minutes. This page covers how documents are sorted, and why that step is intentionally simple.</p>
+    <div class="tldr"><div class="tlh">TL;DR</div><ul>
+      <li>Documents are sorted by a <b>deterministic rules scorer</b> — explainable, auditable, and effectively <span class="metric">$0</span> per document.</li>
+      <li>Only the ambiguous tail escalates to an LLM; each document type routes to its own extractor and schema.</li>
+      <li>Accuracy improves offline (via GEPA) <b>without</b> sacrificing the deterministic, auditable inference.</li>
+    </ul></div>
+
+    <h2>Rules, not an LLM — and the reason is legal, not cost</h2>
+    <p>The reflex is to ask an LLM "what kind of document is this?" For a legal client, that's the wrong first move. Picture having to explain to an auditor <i>why</i> a document was classified as an invoice. With an LLM, the honest answer is "the model thought so." With a scoring rule, it's concrete: <i>"these words appeared, here's what each is worth, it cleared the bar."</i> One answer survives scrutiny; the other doesn't. So we classify with <b>plain rules over the text — deterministic, explainable, and auditable.</b></p>
+
+    <h3>How the scorer thinks</h3>
+    <p>Roughly how you'd eyeball a page in two seconds — three signals: the <b>words</b> ("invoice number," "bill to," "amount due" — weighted, since "invoice number" is far stronger evidence than "subtotal"), the <b>shape</b> (an invoice-number pattern, currency totals, a line-item table — which tells real invoices apart from contracts that merely mention one), and the <b>envelope</b> (file type and length: emails are <code>.eml</code>, contracts are long, minutes have "action items"). Highest score wins — but only if it clears a confidence threshold. If nothing's convincing, the doc is marked <i>unknown</i> rather than force-fit.</p>
+
+    <div class="callout"><strong>The threshold doubles as an input guard.</strong> Because the POC handles invoices, the same confidence check answers "is this actually an invoice?": a contract sent to the invoice extractor is <b>rejected up front</b> — with a reason and the signals that fired — rather than having invoice fields hallucinated onto it. This adds failure-handling at no extra cost.</div>
+
+    <h2>Worked examples — what fires, and why</h2>
+    <p>Concretely, here's the scorer on four documents — including the tricky case of a contract that <i>mentions</i> an invoice but isn't one:</p>
+    <table>
+      <tr><th>Document (excerpt)</th><th>Signals that fire</th><th>Result</th></tr>
+      <tr><td>"<b>Invoice No.</b> INV-2024-0042 · <b>Bill To:</b> Acme Corp · <b>Subtotal</b> $420 · <b>Total Due</b> $462"</td><td>"invoice no" (high weight) + "bill to", "total due", "subtotal"; plus an invoice-number pattern, currency totals, a line-item table</td><td><b>Invoice</b> — high confidence ✓</td></tr>
+      <tr><td>"This <b>Service Agreement</b> is made between… <b>WHEREAS</b>… the parties… <b>governing law</b>…" (the word "invoice" appears once)</td><td>"agreement", "parties", "whereas", "governing law"; "invoice" fires once but at low weight; <b>no</b> invoice-number pattern, <b>no</b> line-item table</td><td><b>Contract</b> — invoice score stays low, so it's correctly <i>not</i> sent to the invoice extractor</td></tr>
+      <tr><td>".eml file · From / To / Subject headers · "Please find attached…" · short</td><td>file type = <code>.eml</code> and short length (metadata, free) + email markers</td><td><b>Email</b> — decided on metadata before even reading the body</td></tr>
+      <tr><td>Phone photo, OCR garbled: "lnv01ce … t0tal …"</td><td>too few keywords survive the garble → score below threshold</td><td><b>Unknown</b> → escalate to the vision model / human</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">Row 2 is the whole reason structure matters: keywords alone would mis-flag the contract; the absence of an invoice-number pattern and a line-item table keeps its invoice score low. And every decision logs <i>which</i> signals fired — that's the auditable part.</p>
+
+    <h2>Where it goes next: a ladder, not a dead end</h2>
+    <p>Rules are a great start, not a forever home. The honest roadmap is a ladder you climb only when forced: <b>rules → classic ML (TF-IDF + logistic regression, once you have labels) → embeddings (when wording drifts) → an LLM (only for the ambiguous tail)</b>. What ties the rungs together is confidence-gated escalation — the cheap path handles what it's sure about, and only the uncertain remainder escalates.</p>
+    <div class="mermaid">
+flowchart LR
+  D(["📄 Document"]) --> R["📋 Score with simple rules"]
+  R --> T{"Confident? 📝"}
+  T -->|"yes ~90%"| OUT["✅ Tag it → route to that type's extractor<br/>(record which words fired) 📝"]
+  T -->|no| ESC["🧠 Ask the LLM"]
+  ESC --> H[("📥 Keep the hard case<br/>+ the human's fix")]
+  H -->|"becomes"| TRAIN["🎓 Training data"]
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">Down the "yes" path is the easy ~90% — tagged instantly and 📝 recorded with the exact words that fired (that's the auditable part). The rest escalates to the LLM, and those hard cases plus any human fix become training data. Caveat: the useful labels are the <b>hard</b> cases — training on the easy ones the rules already handle just teaches a model to copy the rules.</p>
+
+    <h2>Making it better automatically — "optimize anything" (GEPA)</h2>
+    <p>The classifier is just <b>keyword weights and thresholds in a config file</b> — text with a measurable score (its accuracy on the gold set). Anything that's text-with-a-score can be tuned by <b>GEPA</b>, a reflective optimizer that reads the failures, proposes an improved version, and keeps a frontier of the best variants — beating reinforcement learning by ~6–19 points while using up to <b>35× fewer trials</b>.<sup class="src"><a href="https://arxiv.org/abs/2507.19457" target="_blank">[3]</a></sup></p>
+    <p>So we point GEPA at the misclassified examples the <a href="eval.html">eval loop</a> collects, and it tunes the weights and thresholds for us. Crucially the optimization runs <b>offline</b> — at inference the classifier is still the same fast, deterministic, explainable rules. We get learned-quality accuracy <i>without</i> giving up the auditability that made rules the right call. (The same tool, as <code>dspy.GEPA</code>, can later optimize the extraction prompts too.)</p>
+
+    <h2>Documents that are just pictures</h2>
+    <p>A scan has no text until something reads it. We use a fast, character-level OCR engine (Tesseract-class), <b>not</b> a vision model — and the reason is the shape of the failure. OCR fails <i>honestly</i>: it garbles characters ("invoice" → "lnvo1ce") but never invents a paragraph or silently quits. A vision model can fabricate a plausible-but-wrong value that <i>looks</i> fine — a documented failure mode: under visual degradation, multimodal models lean on their language priors and generate <i>hallucinatory</i> content instead of flagging that they can't read it.<sup class="src"><a href="https://arxiv.org/abs/2506.20168" target="_blank">[1]</a></sup> For legal, an obviously-garbled error that trips an alarm beats a confident wrong one that passes validation.</p>
+    <p>And when a scan <i>is</i> too messy for OCR? The garbled text matches no invoice keywords, the score collapses, and the doc <b>auto-escalates to the vision model</b> — exactly where vision models shine. So we never chose OCR <i>or</i> VLM globally: cheap OCR is the default, the VLM is the per-document fallback for the hard tail.</p>
+    <div class="callout warn"><strong>Where this could be wrong:</strong> it assumes documents are <i>mostly</i> clean. If the firm's intake is mostly handwriting and phone photos, OCR's hit rate collapses and you'd flip to vision-first. We can't know from the brief — so the real move is to <b>test on a sample of their actual documents.</b></div>
+
+    <div class="callout"><strong>Scope:</strong> all of this is Part-1 platform thinking. The Part-2 invoice code skips classification entirely — none of this OCR/rules machinery ships. See the <a href="task2-service.html">code-vs-slides boundary</a>.</div>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] <i>Seeing is Believing? Mitigating OCR Hallucinations in MLLMs</i>, arXiv 2506.20168 (NeurIPS 2025) — under degradation, multimodal models hallucinate document content rather than signalling uncertainty; benchmark includes invoices. <a href="https://arxiv.org/abs/2506.20168" target="_blank">arxiv.org/abs/2506.20168</a></li>
+      <li>[2] Li et al., <i>Visual information extraction via classification-guided LVLMs</i>, Sci. Reports s41598-026-49319-z (2026) — decoupling document-type classification from extraction gives high accuracy with minimal supervision. <a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">nature.com</a></li>
+      <li>[3] Agrawal et al., <i>GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning</i>, arXiv 2507.19457 (ICLR 2026 Oral) — optimizes any text artifact against a metric; ~6–19pp over RL with up to 35× fewer rollouts. Also <code>dspy.GEPA</code>. <a href="https://arxiv.org/abs/2507.19457" target="_blank">arxiv.org/abs/2507.19457</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="pipeline.html">← ③ Execution · Slide B</a>
+      <a href="storage-audit.html">⑤ Storage & Audit →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

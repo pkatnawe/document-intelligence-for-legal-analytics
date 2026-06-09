@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Evaluation & Improvement</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Platform</div>
+    <h1>Evaluation &amp; Improvement</h1>
+    <p class="lead">Two things the brief implies but doesn't spell out: the extractor must be <b>testable before deployment</b>, and the system must <b>improve on the documents this firm actually receives</b>. Both come from measuring every stage and closing the loop.</p>
+    <div class="tldr"><div class="tlh">TL;DR</div><ul>
+      <li>Quality is measured on a fixed <b>gold set before deploy</b> (a CI gate) and improves on the firm's documents after deploy.</li>
+      <li>Metrics: field F1, schema-valid rate, hallucination rate, escalation rate, latency, cost per document.</li>
+      <li>Bootstrapped today with the public <b>KIE-HVQA</b> degraded-invoice set — before any client data exists.</li>
+    </ul></div>
+
+    <h2>What we measure</h2>
+    <p>A handful of numbers, each tied to something the case cares about:</p>
+    <table>
+      <tr><th>Metric</th><th>Why it matters here</th></tr>
+      <tr><td><b>Field accuracy / F1</b> (per field + overall)</td><td>The core job — are the header + line-items right?</td></tr>
+      <tr><td><b>Schema-valid rate</b></td><td>How often output fits the contract first try (failure case ⓐ)</td></tr>
+      <tr><td><b>Hallucination rate on degraded scans</b></td><td>The legal risk — confident-but-wrong values (failure case ⓑ)</td></tr>
+      <tr><td><b>Escalation rate</b></td><td>How much traffic hits tier-2 / a human — drives cost &amp; latency</td></tr>
+      <tr><td><b>Latency p50 / p95</b> &amp; <b>cost per doc</b></td><td>The "real-world latency" and cost story, with real numbers</td></tr>
+    </table>
+
+    <h2>Before we deploy — the offline harness</h2>
+    <p>We don't wait for production to find out if it works. We assemble a small <b>gold set</b> — labelled documents with known-correct answers — and run the whole pipeline against it, scoring the metrics above. The deploy only happens if it clears a bar, which makes evaluation a <b>gate in CI/CD</b> (see <a href="dev-loop.html">⑦</a>), not an afterthought.</p>
+    <div class="callout"><strong>We can start today, before the client gives us a single file:</strong> <b>KIE-HVQA</b> ships invoices with simulated degradation and reliability labels — a ready-made eval set for the scan / hallucination path — alongside the case's own sample invoice and a small hand-labelled seed.<sup class="src"><a href="https://huggingface.co/datasets/bytedance-research/KIE-HVQA" target="_blank">[1]</a></sup></p>
+
+    <h2>After we deploy — it improves on their documents</h2>
+    <p>This is the part that makes it a living system rather than a one-off. The escalated and human-corrected cases the pipeline already captures<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[2]</a></sup> flow back into the gold set. Each release is re-scored, and the numbers are tracked over time in MLflow — so improvement (or regression) is visible, not anecdotal.</p>
+    <div class="mermaid">
+flowchart LR
+  G[("📋 Gold set<br/>labelled invoices")] --> R["▶️ Run the pipeline"]
+  R --> M["📊 Score<br/>accuracy · schema · hallucination · latency · cost"]
+  M --> GATE{"meets the bar?"}
+  GATE -->|yes| DEP["🚀 Deploy"]
+  GATE -->|"no"| FIX["🔧 Tune thresholds · prompts"]
+  FIX --> R
+  DEP --> PROD["🏢 Real documents"]
+  PROD --> ESC["🚩 Escalated + human-fixed cases"]
+  ESC --> G
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">Left loop = <b>before deploy</b> (run → score → meets the bar? → tune until it does). Right loop = <b>after deploy</b> (real documents surface hard cases → humans fix them → they join the gold set → next release is measured against them). The firm's own document mix is what trains the system over time.</p>
+
+    <h2>What the growing gold set unlocks</h2>
+    <p>The labelled data we accumulate is the key that turns on the levers we deliberately left off at the start:</p>
+    <ul style="color:#c4cdd8;line-height:1.8;font-size:14px">
+      <li><b>Tuned confidence thresholds</b> — set the escalate-vs-accept cut-offs from data instead of guessing (the cascade thresholds are <i>learned</i>, exactly as FrugalGPT does it).<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[2]</a></sup></li>
+      <li><b>DSPy prompt optimization</b> — DSPy's optimizer compiles the extractor against an eval metric once we have examples; this is the headline DSPy feature we said was a <i>later</i> lever — eval is what unlocks it.<sup class="src"><a href="https://dspy.ai/learn/optimization/optimizers/" target="_blank">[3]</a></sup></li>
+      <li><b>Climbing the classifier ladder</b> — labelled docs are what let us move from rules → trained classifier (see <a href="classification.html">④</a>).</li>
+    </ul>
+
+    <div class="callout win"><strong>Why it matters:</strong> a proof-of-concept is a hypothesis, not a delivery. The evaluation harness turns every claim in this documentation — accuracy, hallucination-resistance, latency — into a measured number, and the feedback loop is the concrete answer to how the system improves once it is live.</div>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] KIE-HVQA — invoices with simulated degradation + reliability labels. <a href="https://huggingface.co/datasets/bytedance-research/KIE-HVQA" target="_blank">huggingface.co</a></li>
+      <li>[2] Chen et al., <i>FrugalGPT</i>, arXiv 2305.05176 — cascade thresholds learned from a training set. <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
+      <li>[3] DSPy optimizers — compile prompts/weights against an eval metric. <a href="https://dspy.ai/learn/optimization/optimizers/" target="_blank">dspy.ai</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="dev-loop.html">← ⑦ Dev / Test / Deploy</a>
+      <a href="cost.html">💵 Cost & ROI →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

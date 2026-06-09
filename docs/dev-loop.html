@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⑦ Dev / Test / Deploy</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Platform</div>
+    <h1>Dev / Test / Deploy</h1>
+    <p class="lead">Testing the models does not require deploying to Databricks first — which shapes the development workflow: build locally against the live endpoints, deploy last.</p>
+
+    <div class="callout win"><strong>You test from your laptop.</strong> Databricks serving endpoints are ordinary HTTPS endpoints, and the VS Code extension already sets up auth. Local Python calls the <b>live</b> models — no deploy needed. Deploying the app is only the final packaging step. So the loop is: write locally → call live models → deploy last.</p></div>
+
+    <p>Two phases, same code. In <b>dev</b>, code runs on your laptop and reaches the model over HTTPS using your extension profile. When <b>deployed</b>, the same code runs in a Databricks App and reaches the same endpoint over the internal network, authed by the app's service principal. Nothing about the code changes.</p>
+
+    <h2>The smoke test (our first real action)</h2>
+    <p>Sixty seconds to prove the whole premise — that we can call a live model with a token:</p>
+    <div class="tabs" data-grp="smoke">
+      <div class="tab active" data-t="sdk">databricks-sdk</div>
+      <div class="tab" data-t="curl">curl</div>
+    </div>
+    <div class="code" data-grp="smoke">
+    <pre data-c="sdk"><code><span class="cm"># pip install databricks-sdk openai</span>
+<span class="kw">from</span> databricks.sdk <span class="kw">import</span> WorkspaceClient
+w = <span class="fn">WorkspaceClient</span>()                 <span class="cm"># uses the extension's profile</span>
+client = w.serving_endpoints.<span class="fn">get_open_ai_client</span>()
+resp = client.chat.completions.<span class="fn">create</span>(
+    model=<span class="st">"databricks-gemini-3-5-flash"</span>,
+    messages=[{<span class="st">"role"</span>:<span class="st">"user"</span>,<span class="st">"content"</span>:<span class="st">"Reply with: ok"</span>}],
+)
+<span class="fn">print</span>(resp.choices[<span class="nm">0</span>].message.content)</code></pre>
+    <pre data-c="curl" hidden><code>curl -s <span class="st">"$DATABRICKS_HOST/serving-endpoints/databricks-gemini-3-5-flash/invocations"</span> \
+  -H <span class="st">"Authorization: Bearer $DATABRICKS_TOKEN"</span> \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{"messages":[{"role":"user","content":"Reply with: ok"}]}'</span></code></pre>
+    </div>
+    <div class="callout win"><strong>Already verified (2026-06-08):</strong> auth returned <code>HTTP 200</code> as <code>pkatnawe@uwo.ca</code>; the serving-endpoints and Apps and Jobs APIs all returned <code>200</code> (there's even one app already in the workspace). So the token works, the models are reachable, and the deploy target is real. <span class="tag">Token used via env var only — never written to the repo; rotate it once auth is wired since it appeared in a screenshot.</span></div>
+
+    <div class="callout win"><strong>End-to-end verified live (2026-06-09):</strong> the service ran against the case's own dataset on Free Edition with the Delta store in Unity Catalog. The invoice's text layer was corrupt, so it routed to the <b>vision path</b>; <code>gemma-3-12b</code> extracted it (invoice 2011981, Cargo Collective, $99 USD); the job + result + audit trail persisted to <code>workspace.invoice_poc</code> Delta tables, and <code>DESCRIBE HISTORY</code> showed the versioned who/what/when audit primitive.</div>
+
+    <div class="callout warn"><strong>Free Edition model reality (important):</strong> the proprietary models (Gemini, Claude) are <b>disabled on Free Edition</b> — calls return <code>PERMISSION_DENIED: rate limit of 0</code>. Open-weight models <i>do</i> serve, so the POC uses <code>gemma-3-12b</code> (vision) and <code>meta-llama-3-3-70b-instruct</code> / <code>gpt-oss-120b</code> (text). Production on a paid workspace swaps the tiers back to Gemini/Claude — same code, one env change. This is the concrete reason model choice is config, not code.</div>
+
+    <h2>What's actually callable</h2>
+    <p>One gotcha: our workspace exposes a <b>subset</b> of the full Databricks model catalog (the catalog also has Sonnet 4.6, the GPT-5.x family, etc.). Design against what's actually live for us:</p>
+    <table>
+      <tr><th>Endpoint</th><th>Role</th><th>Note</th></tr>
+      <tr><td><b>databricks-gemini-3-5-flash</b></td><td><b>Tier-1 default</b> — fast, vision; the Gemini family is "optimized for high-throughput, cost-effective deployments"</td><td>Google <b>global</b> endpoint → needs cross-geo routing enabled (we're in Canada; it works in our workspace, but it's a real gate on a locked-down client one)<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/supported-models" target="_blank">[1]</a></sup></td></tr>
+      <tr><td>databricks-claude-opus-4-8</td><td><b>Tier-2 escalation</b> — "excels at complex extraction… document understanding"</td><td>Hosted <i>inside</i> the Databricks security perimeter — no cross-geo note, so escalation is safe<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/supported-models" target="_blank">[1]</a></sup></td></tr>
+      <tr><td>databricks-gemma-3-12b</td><td>Open-weight vision alternative (text + image)</td><td>live</td></tr>
+      <tr><td>databricks-meta-llama-3-3-70b-instruct</td><td>Strong text-only option</td><td>—</td></tr>
+      <tr><td>databricks-bge-large-en · gte-large-en</td><td>Embeddings — future search / Q&A</td><td>—</td></tr>
+    </table>
+    <div class="callout warn"><strong>Dropped on purpose:</strong> we removed <code>databricks-llama-4-maverick</code>. It's retired for pay-per-token (Mar 9, 2026) and for provisioned throughput on <b>June 9, 2026</b>.<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/retired-models-policy" target="_blank">[2]</a></sup> Building on a model that's being retired would be a liability; tracking deprecations keeps the model set current.</div>
+
+    <h2>How it productionizes — CI/CD</h2>
+    <p>Not required by the case, but a one-line mention signals operational maturity. In plain terms: <b>CI</b> runs your tests automatically on every push; <b>CD</b> auto-deploys what passes. (Full definition on <a href="concepts.html">★ Concepts</a>.)</p>
+    <div class="mermaid">
+flowchart LR
+  DEV["✏️ Write code"] --> PUSH["⬆️ Push to GitHub"] --> CI{"Tests pass?"}
+  CI -->|no| STOP["🛑 Blocked — never ships"]
+  CI -->|yes| CD["🚀 Auto-deploy"] --> APP["✅ Live in Databricks"]
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">A <b>Databricks Asset Bundle</b> (<code>databricks.yml</code>) makes the deploy a repeatable one-liner, and the test gate means broken code never reaches the workspace. For the POC we'll deploy by hand first; this is the "here's how it productionizes" line on the slide.</p>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] <i>Databricks-hosted foundation models</i> — Gemini global endpoint requires cross-geo routing; Claude Opus 4.8 "excels at complex extraction… document understanding," hosted within the Databricks security perimeter. <a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/supported-models" target="_blank">supported-models</a></li>
+      <li>[2] <i>Generative AI models maintenance policy</i> — Llama 4 Maverick retirement dates (Mar 9 / Jun 9, 2026). <a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/retired-models-policy" target="_blank">retired-models-policy</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="extensibility.html">← ⑥ Extensibility & Scale</a>
+      <a href="eval.html">✓ Evaluation & Improvement →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

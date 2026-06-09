@@ -1,0 +1,42 @@
+# Databricks Asset Bundle — deploys the extraction service as a Databricks App.
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run      -t dev invoice_extractor
+bundle:
+  name: invoice-extraction
+
+# Keep the app upload lean — exclude the docs site, papers, data, and caches.
+sync:
+  exclude:
+    - "docs/**"
+    - "research_papers/**"
+    - "*.pdf"
+    - "*.db"
+    - "**/__pycache__/**"
+    - ".git/**"
+
+resources:
+  apps:
+    invoice_extractor:
+      name: invoice-extractor
+      description: "Async PDF invoice extraction service (FastAPI on Databricks Apps)"
+      source_code_path: ./
+      # The PAT is injected from a Databricks secret (never committed). app.yaml maps this
+      # resource into DATABRICKS_TOKEN via `valueFrom: "databricks-token"`.
+      resources:
+        - name: "databricks-token"
+          secret:
+            scope: "invoice_poc"
+            key: "databricks_token"
+            permission: "READ"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-bb185e3a-c061.cloud.databricks.com
+  # prod:
+  #   mode: production
+  #   workspace:
+  #     host: https://<paid-workspace>.cloud.databricks.com

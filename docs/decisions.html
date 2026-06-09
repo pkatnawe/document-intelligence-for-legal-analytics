@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⑧ Decisions & Open Qs</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Tracking</div>
+    <h1>Decisions &amp; Open Questions</h1>
+    <p class="lead">The running log — what's settled, and why, in one place. If we ever wonder "wait, did we decide that?", the answer lives here.</p>
+
+    <h2>Settled</h2>
+    <div class="card">
+      <div class="kk"><div class="t">Two tasks, split</div><div>Part 1 = breadth (all formats, slides). Part 2 = depth (PDF invoices, code). Design Part 1 first.</div></div>
+      <div class="kk"><div class="t">Architecture scope</div><div>Full document platform on the slides; invoice as the implemented vertical.</div></div>
+      <div class="kk"><div class="t">Dev / test loop</div><div>Test live models from the laptop; deploy the app last. <span class="tag">verified working</span></div></div>
+      <div class="kk"><div class="t">Classifier</div><div>Rules over text (not an LLM) for determinism + auditability, with a confidence-gated escalation ladder. <a href="classification.html">④</a></div></div>
+      <div class="kk"><div class="t">Input guard</div><div>Below-threshold → reject fast, with the reason and which signals fired.</div></div>
+      <div class="kk"><div class="t">Scan routing</div><div>Deterministic OCR reads scans for classification (bounded failure); garbled scans auto-escalate to the VLM. Extraction of scans always uses the VLM. <a href="classification.html">④</a></div></div>
+      <div class="kk"><div class="t">Training data</div><div>Capture the hard / escalated / human-corrected cases — not auto-label everything.</div></div>
+      <div class="kk"><div class="t">Storage + audit</div><div>Medallion (Delta) + Unity Catalog + an append-only event log. <a href="storage-audit.html">⑤</a></div></div>
+      <div class="kk"><div class="t">Two audit layers</div><div>Business event log (state changes) + MLflow tracing (model calls). MLflow wired in code, ~2 lines.</div></div>
+      <div class="kk"><div class="t">LLM layer</div><div>DSPy typed signature = model interface + validation contract in one. <a href="concepts.html">★</a></div></div>
+      <div class="kk"><div class="t">Model tiering</div><div>Speed-first: tier-1 <code>gemini-3-5-flash</code> (fast, vision) → escalate to <code>claude-opus-4-8</code> on low confidence. <a href="extensibility.html">⑥</a></div></div>
+      <div class="kk"><div class="t">Extensibility</div><div>Store raw + page-chunks + embeddings + metadata now → summarization/Q&A becomes a later DSPy signature. <a href="extensibility.html">⑥</a></div></div>
+      <div class="kk"><div class="t">Code scope</div><div>Lean core — PDF → text/VLM extract → validate → async. No classifier/OCR/multi-format in code. <a href="task2-service.html">⑨</a></div></div>
+      <div class="kk"><div class="t">Persistence</div><div>Delta (delta-rs locally, Unity Catalog deployed). Job-status in Delta is fine at POC volume; transactional store at scale.</div></div>
+      <div class="kk"><div class="t">Apps + Jobs</div><div>Confirmed enabled on Free Edition. Deploy target is real. <a href="dev-loop.html">⑦</a></div></div>
+      <div class="kk"><div class="t">Free Edition path</div><div>POC on Free Edition (serverless-only, trusted-domain egress, non-commercial); production Claims engagement on a paid workspace — <i>same code, same bundle</i>. <a href="case.html">①</a></div></div>
+      <div class="kk"><div class="t">Model currency</div><div>Dropped <code>llama-4-maverick</code> (retires Jun 9, 2026). Tier-1 <code>gemini-3-5-flash</code> needs cross-geo routing; tier-2 <code>opus-4-8</code> is in-perimeter. <a href="dev-loop.html">⑦</a></div></div>
+      <div class="kk"><div class="t">Eval-driven</div><div>An offline gold-set harness gates deploy (eval as a CI check); escalated + human-fixed cases flow back so it improves on the firm's own docs. <a href="eval.html">Evaluation</a></div></div>
+      <div class="kk"><div class="t">Built &amp; verified</div><div><span class="b decided">2026-06-09</span> &nbsp;Part-2 service built (<code>app/</code>) and run end-to-end on the case dataset: corrupt text layer → vision path → <code>gemma-3-12b</code> → Delta tables in Unity Catalog (jobs + audit_events; <code>DESCRIBE HISTORY</code> verified). Free Edition disables Gemini/Claude (rate limit 0) → POC uses open-weight, production swaps tiers (same code).</div></div>
+    </div>
+
+    <h2>Open questions</h2>
+    <p class="lead">The four big forks are resolved (above). The buttons stay so you can revisit; your picks save in your browser — click <b>Copy my decisions</b> to send them back to me.</p>
+    <div class="oq" data-oq="scan-routing">
+      <div class="q"><b>Scan classification</b></div>
+      <div class="lean">
+        <button data-v="A: metadata-first">A · metadata</button>
+        <button data-v="B: VLM one-call">B · VLM</button>
+        <button data-v="C: OCR-then-rules">C · OCR-then-rules</button>
+      </div>
+    </div>
+    <div class="oq" data-oq="storage">
+      <div class="q"><b>Storage</b></div>
+      <div class="lean">
+        <button data-v="combined (rec)">combined</button>
+        <button data-v="medallion only">medallion only</button>
+        <button data-v="simple tables">simple tables</button>
+      </div>
+    </div>
+    <div class="oq" data-oq="model">
+      <div class="q"><b>Default-tier model</b></div>
+      <div class="lean">
+        <button data-v="gemini-3-5-flash">gemini-flash (speed)</button>
+        <button data-v="claude-opus-4-8">opus (quality)</button>
+        <button data-v="gemma-3-12b">gemma-3-12b (open)</button>
+      </div>
+    </div>
+    <div class="oq" data-oq="apps-enabled">
+      <div class="q"><b>Apps + Jobs</b></div>
+      <div class="lean">
+        <button data-v="confirmed">confirmed ✓</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b>Your leanings so far:</b>
+        <button id="copyleans" style="font:12px var(--mono);background:var(--panel2);color:var(--acc2);border:1px solid var(--acc2);border-radius:20px;padding:6px 14px;cursor:pointer">📋 Copy my decisions</button>
+      </div>
+      <div id="leansum" style="margin-top:8px;color:var(--mut);font-size:13.5px">— no leanings recorded yet —</div>
+    </div>
+
+    <h2>Still genuinely open</h2>
+    <p>Deferred on purpose, to settle with real data rather than guess: whether the document mix is clean enough for OCR-first (test on their docs), and the exact confidence thresholds (tune once extractions accumulate — see <a href="eval.html">Evaluation</a>).</p>
+    <div class="callout warn"><strong>⚖️ Sensitive data &amp; confidentiality — flagged, not building yet.</strong> Legal documents carry PII and privileged information, so a real engagement must decide <b>what may be sent to which model at all</b> — a question for the firm's experts, not us to assume. Open threads: which content is AI-eligible vs human-only; whether to <b>redact</b> PII before any model call; and <b>model placement</b> — our tier-1 <code>gemini-3-5-flash</code> is a <i>global, cross-geo</i> endpoint (data leaves the region) while tier-2 <code>claude-opus-4-8</code> sits <i>inside the Databricks perimeter</i>, so sensitive documents would favour the in-perimeter model. We're not implementing this for the POC, but the design leaves room (Unity Catalog governance + a redaction step before extraction).</div>
+
+    <h2>External data &amp; code we could use <span class="b decided">flagged</span></h2>
+    <p>From the research papers — both publicly released, both relevant to this case:</p>
+    <ul style="color:#c4cdd8;line-height:1.8;font-size:14px">
+      <li><b>KIE-HVQA</b> (HuggingFace) — invoices + ID docs <i>with simulated degradation</i>. An off-the-shelf <b>eval set</b> for our image-only-scan path and hallucination resistance, before we have the client's own docs. <a href="https://huggingface.co/datasets/bytedance-research/KIE-HVQA" target="_blank">dataset</a></li>
+      <li><b>Multi-VIE</b> (GitHub) — reference code + a fine-tuned Qwen2.5-VL model for the classify-then-extract architecture we're using. Useful as a baseline / starting point. <a href="https://github.com/FairmeHIT/Multi-VIE" target="_blank">repo</a></li>
+    </ul>
+    <p style="font-size:13px;color:var(--mut)">Full write-up of the three papers on <a href="concepts.html">★ Concepts → Research grounding</a>.</p>
+
+    <div class="pagenav">
+      <a href="concepts.html">← ★ Concepts & Glossary</a>
+      <a href="task2-service.html">⑨ Service (Part 2) →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

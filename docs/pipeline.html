@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>③ Execution · Slide B</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Part 1 · Slide B</div>
+    <h1>Execution Pipeline</h1>
+    <p class="lead">The step-by-step slide: how a document moves through the system. The idea running through all of it is <b>confidence-gated escalation</b> — the cheap, deterministic path runs first, and the expensive LLM is used only when the cheap path is not sure.</p>
+    <div class="tldr"><div class="tlh">TL;DR</div><ul>
+      <li>Flow: <b>read (any format) → classify → route by type → extract → validate → store</b>.</li>
+      <li>The three required failure cases are handled: unparseable output, image-only scans, transient API errors.</li>
+      <li>Scanned / image-only documents are a first-class path — OCR for classification, a vision model for extraction.</li>
+      <li>Every decision is recorded to the audit trail.</li>
+    </ul></div>
+
+    <div class="mermaid">
+flowchart TB
+  A["📥 PDF · Word · Excel · image<br/>(API or batch)"]:::io --> TL{"Has a text layer?"}:::dec
+  TL -->|"yes — digital file"| TX["📖 Read the text directly"]:::n
+  TL -->|"no — scan / image-only 🖼️"| OCR["🖼️ Render page → image<br/>+ OCR the text"]:::n
+  TX --> SC["📋 Rules scorer over the text<br/>weighted keywords + structure + metadata"]:::n
+  OCR --> SC
+  SC --> C{"confident? 📝"}:::dec
+  C -->|"not sure — the tail"| CL["🧠 LLM zero-shot classify"]:::llm
+  CL --> C2{"confident? 📝"}:::dec
+  C2 -->|"no"| UNK["🚩 Unknown → human 📝"]:::err
+  C -->|"yes ~90%"| RT{{"route by document type"}}:::route
+  C2 -->|"yes"| RT
+  RT -->|"invoice"| E1["🧾 Invoice extractor<br/>header + line-items"]:::n
+  RT -->|"contract"| E2["📑 Contract extractor<br/>parties · dates · clauses"]:::n
+  RT -->|"email · minutes"| E3["✉️ Email / Minutes extractor<br/>participants · actions"]:::n
+  E1 & E2 & E3 --> V{"✅ valid vs that type's schema? 📝"}:::dec
+  V -->|"no → re-ask, then escalate"| ES["🧠 Stronger model"]:::llm --> V
+  V -->|"yes"| S[("💾 Save → Silver/Gold 📝")]:::d
+  V -->|"still no"| H["🚩 Human review 📝"]:::err
+  S --> U["📊 reporting · search · summaries · totals"]:::d
+  AUD[["📝 Audit trail (Databricks-native): append-only log · Delta history · UC lineage · MLflow"]]:::aud
+  C -.-> AUD
+  V -.-> AUD
+  S -.-> AUD
+  classDef io fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
+  classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
+  classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+  classDef route fill:#1d2733,stroke:#4aa3ff,color:#cfe2ff;
+  classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)"><b>Read it (top).</b> Every input type — PDF, Word, Excel, image — meets one question: is there a text layer? <b>Digital files</b> are read directly; <b>image-only files (scans, photos)</b> are rendered to a page image and OCR'd. Either way we now have text to classify, and we <i>remember</i> whether it was a scan. <b>Classify:</b> a cheap rules scorer scores that text (keywords + structure + metadata) — confident → route, unsure → escalate to an LLM classifier, genuine unknown → human. <b>Route &amp; extract:</b> each document type goes to its <b>own extractor + schema</b><sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[2]</a></sup> — and here the scan flag matters: <b>image-only docs are extracted by the vision model from their page image</b>, digital ones by the text LLM, each escalating to a stronger model only when validation fails.<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[1]</a></sup> Every 📝 step is recorded.</p>
+
+    <h2>Why that one pattern earns its keep</h2>
+    <p>Confidence-gated escalation isn't just tidy — it solves three problems at once:</p>
+    <div class="grid3">
+      <div class="card"><h3>🛟 Graceful failure</h3><p style="font-size:13px">A doc the cheap path can't handle is escalated, not guessed at. Worst case it's flagged for a human — never a confident wrong answer. Essential for legal.</p></div>
+      <div class="card"><h3>💰 Lower cost</h3><p style="font-size:13px">The expensive model only runs on the small fraction below the threshold. The cheap path absorbs the easy majority.</p></div>
+      <div class="card"><h3>🎓 Free training data</h3><p style="font-size:13px">Every escalation and human correction is captured — the labels that feed the <a href="eval.html">evaluation loop</a> and teach the cheap path to handle more over time.</p></div>
+    </div>
+
+    <h2>Zoom-in: the invoice the code actually builds</h2>
+    <p>Part 2 is the deep slice of the above — invoices only, so no classifier — and it's where the three failure cases the case names get handled.</p>
+    <div class="mermaid">
+flowchart TB
+  A["📄 PDF invoice"]:::n --> B{"Has selectable text?"}:::dec
+  B -->|yes| C["📖 Read text → fast model"]:::n
+  B -->|"no — it's a scan (ⓑ)"| D["🖼️ Read image → vision model"]:::n
+  C & D --> E{"✅ Fits the schema? (ⓐ)"}:::dec
+  E -->|yes| S[("💾 Save it 📝")]:::d
+  E -->|"no"| FIX["🔁 Re-ask once,<br/>then a stronger model"]:::llm --> E2{"✅ Now?"}:::dec
+  E2 -->|yes| S
+  E2 -->|"still no"| H["🚩 Flag for a human 📝"]:::err
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
+  classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
+  classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">A PDF either has selectable text (read it) or it's a scan (send the image to the vision model — case ⓑ). Either way the result is checked against the schema (ⓐ); if it doesn't fit, we re-ask once, then escalate to a stronger model, and only then flag for a human. Flaky API calls retry with a short back-off (ⓒ). Both outcomes — saved or flagged — are 📝 recorded.</p>
+    <table>
+      <tr><th></th><th>Case requirement</th><th>How it's handled</th></tr>
+      <tr><td><b>ⓐ</b></td><td>Output won't fit the schema</td><td>Validate → re-ask once → escalate to the stronger model → flag for a human. Every step recorded.</td></tr>
+      <tr><td><b>ⓑ</b></td><td>Image-only scan, no text</td><td>Detect missing text layer → send the page image to the VLM (no OCR needed in code).</td></tr>
+      <tr><td><b>ⓒ</b></td><td>Flaky LLM API</td><td>Retry with exponential backoff, on transient errors only; on exhaustion, fail + record.</td></tr>
+    </table>
+
+    <div class="callout"><strong>Slide vs code:</strong> the top diagram is the full platform; the zoom-in is the lean invoice service. No classifier or OCR ships in the code — see the <a href="task2-service.html">⑨ scope boundary</a>.</div>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] Chen et al., <i>FrugalGPT</i>, arXiv 2305.05176 — an LLM cascade matches a top model's accuracy at up to ~98% lower cost. <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
+      <li>[2] Li et al., <i>Visual information extraction via classification-guided LVLMs</i>, Sci. Reports s41598-026-49319-z (2026) — decoupling document-type classification from extraction beats a supervised baseline ~18 F1 zero-shot. <a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">nature.com</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="architecture.html">← ② Platform · Slide A</a>
+      <a href="classification.html">④ Classification →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

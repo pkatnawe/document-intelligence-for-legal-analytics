@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⑥ Extensibility & Scale</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Part 1 · Architecture</div>
+    <h1>Extensibility &amp; Scale</h1>
+    <p class="lead">The brief asks for two forward-looking things: room to add LLM summarization/Q&A later, and a story for scaling to large volumes. Both come down to choices made now.</p>
+    <div class="tldr"><div class="tlh">TL;DR</div><ul>
+      <li>Data is stored so summarization/Q&A is a <b>later add-on, not a rewrite</b> (raw + page-chunks + embeddings + metadata).</li>
+      <li>Scales gracefully: async + Workflows + model tiering, moving to provisioned throughput at high volume.</li>
+      <li>User-facing latency stays low — the API returns a job id in <span class="metric">milliseconds</span>; extraction runs off the request path.</li>
+    </ul></div>
+
+    <h2>Designing today so summarization / Q&A is cheap tomorrow</h2>
+    <p>Q&A over documents is retrieval-augmented generation: find the relevant passages, then ask an LLM over them. We don't build it now — but a few storage choices today make it a small addition instead of a rewrite: <b>keep the raw documents</b> (not just extracted fields), <b>chunk text by page</b> so answers can cite an exact page, <b>embed those chunks</b> into a vector index, and <b>tag every chunk</b> with client, date, and party so retrieval can be filtered. Unity Catalog keeps it all access-controlled.</p>
+    <div class="mermaid">
+flowchart LR
+  SRC[("🗄️ Saved documents")] --> CHK["✂️ Split into pages"] --> EMB["🔢 Turn pages into vectors"] --> VS[("🔍 Searchable index")]
+  subgraph LATER["added later"]
+    Q(["❓ A question"]) --> RET["Find the most relevant pages"]
+    VS --> RET --> ANS["💬 Answer, with citations"]
+  end
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">Everything left of the dotted box we build during the POC anyway. The Q&A feature on the right just plugs into the searchable index — in our stack, simply another DSPy signature reusing the same models. Citations work because we split documents by page, so every answer can point back to its source.</p>
+
+    <h2>The hardest queries — and why the design already handles them</h2>
+    <p>A good slide names the hard cases. The pattern: the genuinely hard queries are <b>structured</b> ones, and those are cheaper and more reliable <i>without</i> an LLM — reserve the LLM for the semantic tail.</p>
+    <table>
+      <tr><th>Hard query</th><th>What handles it</th></tr>
+      <tr><td>"Total spend for client X in 2024" (aggregation)</td><td>A SQL query over Gold tables — no LLM</td></tr>
+      <tr><td>"All docs for Acme" when it's also "Acme Corp." (entity resolution)</td><td>A normalization step in Silver → one canonical client id</td></tr>
+      <tr><td>"Invoices tied to the contract mentioning clause Y" (linking)</td><td>Shared metadata keys (client, claim id) across doc types</td></tr>
+      <tr><td>"Where do we agree to indemnify?" (semantic)</td><td>Vector search over page chunks → cited passages</td></tr>
+      <tr><td>"What changed about this claim over time?" (temporal)</td><td>Delta time-travel + the audit log</td></tr>
+    </table>
+
+    <h2>Scaling as the volume grows</h2>
+    <p>Documents arrive two ways — single files through the <b>API</b>, and <b>batch drops</b> from cloud storage, email, or scanner output — and both feed the same queue, so scale is one problem, not two. The design grows <b>gracefully</b>: the same codebase, with a lever pulled at each stage rather than a rewrite.</p>
+    <table>
+      <tr><th>As volume grows…</th><th>What changes (same code)</th></tr>
+      <tr><td><b>POC</b> — hundreds–thousands</td><td>Pay-per-token model endpoints; background worker inside the App</td></tr>
+      <tr><td><b>Growing</b> — tens of thousands/day</td><td>Heavy work moves to <b>Databricks Workflows</b> (autoscaling workers) behind a durable queue; Delta partitioned by date/client</td></tr>
+      <tr><td><b>High volume</b></td><td>Model endpoints switch from pay-per-token to <b>provisioned throughput</b> — guaranteed capacity that autoscales, since pay-per-token has per-minute rate limits and isn't built for high throughput<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/limits" target="_blank">[3]</a></sup></td></tr>
+    </table>
+    <p>Two things hold across all stages: <b>cost</b> stays controlled by the model cascade (cheap model on the bulk, premium only on the hard tail — up to ~98% cheaper than premium-everywhere<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[1]</a></sup>), and <b>reliability</b> comes from idempotent jobs, retries with backoff, and a dead-letter path so one bad document never blocks a batch.</p>
+
+    <h2>Real-world latency</h2>
+    <p>Task 3 asks for real-world latency, and the core answer is structural: the API is <b>async</b>, so a POST returns a job id in milliseconds — the slow LLM work never sits on the request path, and user-facing latency is independent of how long extraction takes.</p>
+    <p>Processing itself stays fast for concrete reasons: model tiering means most docs return from a low-latency model and only the hard tail pays the premium cost; we send only the relevant pages, not whole documents; embeddings are precomputed at ingest so future search is a quick lookup; identical resubmissions are cached. SLA framing: the API accepts-and-returns immediately (HTTP 202) and extracts on a worker, so the <i>API's</i> response time is decoupled from extraction time — the standard async-accepted pattern. Extraction time itself is dominated by the tier-1 model for the majority of documents, with tier-2 only on the escalated tail.</p>
+    <div class="callout"><strong>The model tiers</strong> (decided): tier-1 <code>gemini-3-5-flash</code> — fast, vision-capable, handles the majority (Google global endpoint, so cross-geo routing must be enabled); tier-2 <code>claude-opus-4-8</code> — "complex extraction… document understanding," hosted inside the Databricks perimeter.<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/supported-models" target="_blank">[2]</a></sup> With DSPy, switching tiers is a one-line change.</div>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] Chen et al., <i>FrugalGPT</i>, arXiv 2305.05176 — LLM cascade matches a top model at up to ~98% lower cost. <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
+      <li>[2] <i>Databricks-hosted foundation models</i> — model descriptions; Gemini cross-geo routing; Opus 4.8 hosting + "document understanding." <a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/supported-models" target="_blank">supported-models</a></li>
+      <li>[3] <i>Foundation Model APIs limits and quotas</i> — pay-per-token has per-minute rate limits and isn't for high throughput; provisioned throughput gives guaranteed, autoscaling capacity for production. <a href="https://learn.microsoft.com/en-us/azure/databricks/machine-learning/foundation-model-apis/limits" target="_blank">limits</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="storage-audit.html">← ⑤ Storage & Audit</a>
+      <a href="dev-loop.html">⑦ Dev / Test / Deploy →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

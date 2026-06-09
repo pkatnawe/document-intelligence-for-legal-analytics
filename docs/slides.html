@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>▣ The Two Slides</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Deliverable</div>
+    <h1>The Two Slides <span class="locked">🔒 locked · v1 · 2026-06-08</span></h1>
+    <p class="lead">The actual submission for Task 1 — exactly two slides, each one big diagram plus a few annotations, matching the brief's "a sentence or a diagram annotation per point is sufficient." The rest of this site is the thinking behind them; <i>these two are what you present.</i></p>
+
+    <h2>Solution overview — the key decisions</h2>
+    <p>One paragraph of orientation before the slides: we turn the firm's mixed documents into structured, auditable data with a <b>cheap-first, escalate-when-unsure</b> design — deterministic rules and a fast model handle the easy majority, a premium model handles the hard tail, and a human handles the rest. The decisions that shape everything:</p>
+    <table>
+      <tr><th>Decision</th><th>In one line</th></tr>
+      <tr><td><b>Classify then route</b></td><td>Rules scorer over text → escalate to an LLM if unsure → each doc type gets its own extractor + schema</td></tr>
+      <tr><td><b>Extract with DSPy</b></td><td>A typed signature = the LLM interface and the validation contract in one object</td></tr>
+      <tr><td><b>Model tiering</b></td><td>Gemini Flash by default, escalate to Claude Opus only on low confidence (speed + cost)</td></tr>
+      <tr><td><b>Fail gracefully</b></td><td>Nothing guessed — escalate, then a human; every decision recorded</td></tr>
+      <tr><td><b>Native audit</b></td><td>Append-only log + Delta history + Unity Catalog lineage/access + MLflow — configured, not built</td></tr>
+      <tr><td><b>Async API</b></td><td>Job id returned instantly, processed on a worker, polled for the result</td></tr>
+      <tr><td><b>Eval-driven</b></td><td>Test on a gold set before deploy; escalated + corrected cases improve it on the firm's own docs</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">Cost of all this: ~$0.005/document vs ~$15–25 done by hand — see <a href="cost.html">Cost &amp; ROI</a>.</p>
+
+    <!-- ============ SLIDE A ============ -->
+    <div class="slide">
+      <div class="stag">Slide A</div>
+      <div class="stitle">Document Intelligence Platform — High-Level Overview</div>
+      <div class="ssub">Automating ingestion + analysis of the firm's Claims documents — invoices, contracts, minutes, emails.</div>
+      <div class="mermaid">
+flowchart TB
+  subgraph ING["① Ingest — API + batch"]
+    A1["📥 Upload / API"]:::n
+    A2["📨 Batch / email drop"]:::n
+  end
+  B1[("🗄️ Keep the original 📝")]:::d
+  C1{"🔎 Classify type<br/>rules → LLM if unsure 📝"}:::dec
+  RT{{"route by type"}}:::route
+  E1["🧾 Invoice"]:::n
+  E2["📑 Contract"]:::n
+  E3["✉️ Email / Minutes"]:::n
+  V1{"✅ Valid vs schema? 📝"}:::dec
+  S1[("💾 Validated + aggregates 📝")]:::d
+  G1["📊 Reporting · search · summaries · totals"]:::n
+  Q["🚩 Human review 📝"]:::err
+  A1 & A2 --> B1 --> C1
+  C1 -->|"not sure"| Q
+  C1 --> RT
+  RT --> E1 & E2 & E3 --> V1
+  V1 -->|yes| S1 --> G1
+  V1 -->|"no"| Q
+  AUD[["📝 Audit trail (Databricks-native)<br/>append-only log · Delta history · UC lineage · MLflow"]]:::aud
+  B1 -.-> AUD
+  C1 -.-> AUD
+  V1 -.-> AUD
+  S1 -.-> AUD
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
+  classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
+  classDef route fill:#1d2733,stroke:#4aa3ff,color:#cfe2ff;
+  classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+      </div>
+      <div class="anns">
+        <div><b>Inputs:</b> PDF · Word · Excel · image — digital files read directly; <b>image-only scans → OCR for classification + vision model for extraction</b></div>
+        <div><b>Classify &amp; route:</b> a cheap rules scorer reads the text; escalate to an LLM only if unsure; then each <b>document type → its own extractor + schema</b></div>
+        <div><b>Failure handling:</b> anything uncertain is escalated, then sent to a human; nothing fails silently; transient errors retry</div>
+        <div><b>Scale:</b> async + Databricks Workflows + model tiering; grows to provisioned throughput at high volume</div>
+        <div><b>Audit trail:</b> Databricks-native — append-only event log + Delta history/time-travel + Unity Catalog lineage &amp; access logs + MLflow</div>
+      </div>
+      <div class="sfoot"><b>Stack:</b> Databricks Apps (API) · Foundation Model APIs (LLM/VLM) · Delta + Unity Catalog (storage &amp; audit) · DSPy (typed extraction) · Workflows (scale)</div>
+    </div>
+    <div class="notes">
+      <div class="nlab">Talk-track — Slide A</div>
+      The problem is turning the firm's messy Claims paperwork into structured, queryable, auditable data. Our approach is a <b>cheap-first cascade</b>: a deterministic step handles the easy majority and we only spend an LLM when the system isn't confident — that's what keeps it fast <i>and</i> affordable. The three things the brief asks about are on the slide: failures are <b>escalated, never guessed</b> (worst case a human reviews); it <b>scales</b> by decoupling ingest from extraction and moving to provisioned throughput as volume grows; and the <b>audit trail is native to Databricks</b> — we configure Delta history, Unity Catalog lineage, and MLflow rather than build a logging system. That last point is the main reason we chose Databricks.
+    </div>
+
+    <div class="card"><b>✓ Constraints this slide answers (from the brief):</b>
+      <div class="anns" style="margin-top:8px">
+        <div>Summarize problem, approach &amp; chosen stack ✓</div>
+        <div>Handles failures at each stage ✓</div>
+        <div>Scales to large document volumes ✓</div>
+        <div>Data model supports the audit trail ✓</div>
+        <div>Ingests + classifies all document types ✓</div>
+        <div>Extensible to LLM summarization / Q&amp;A ✓</div>
+        <div>Confidentiality via Unity Catalog governance ✓</div>
+      </div>
+    </div>
+
+    <!-- ============ SLIDE B ============ -->
+    <div class="slide">
+      <div class="stag">Slide B</div>
+      <div class="stitle">Detailed Execution Pipeline</div>
+      <div class="ssub">How one document flows through — cheap path first, escalate only when unsure, record every decision.</div>
+      <div class="mermaid">
+flowchart TB
+  A["📥 PDF · Word · Excel · image"]:::io --> TL{"Text layer?"}:::dec
+  TL -->|"yes — digital"| TX["📖 Read the text"]:::n
+  TL -->|"no — scan / image 🖼️"| OCR["🖼️ Page image + OCR"]:::n
+  TX & OCR --> SC["📋 Rules scorer<br/>keywords + structure + metadata"]:::n
+  SC --> C{"confident? 📝"}:::dec
+  C -->|"not sure"| CL["🧠 LLM zero-shot classify"]:::llm --> C2{"confident? 📝"}:::dec
+  C2 -->|"no"| UNK["🚩 Unknown → human 📝"]:::err
+  C -->|"yes ~90%"| RT{{"route by type"}}:::route
+  C2 -->|"yes"| RT
+  RT -->|invoice| E1["🧾 Invoice"]:::n
+  RT -->|contract| E2["📑 Contract"]:::n
+  RT -->|"email · minutes"| E3["✉️ Email/Minutes"]:::n
+  E1 & E2 & E3 --> V{"✅ valid vs type's schema? 📝"}:::dec
+  V -->|"no → re-ask, escalate"| ES["🧠 stronger model"]:::llm --> V
+  V -->|yes| S[("💾 Save → Silver/Gold 📝")]:::d
+  V -->|"still no"| H["🚩 Human 📝"]:::err
+  S --> U["📊 reporting · search · summaries · totals"]:::d
+  classDef io fill:#0f2a1a,stroke:#3fb950,color:#c9f7d4;
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
+  classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
+  classDef llm fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+  classDef route fill:#1d2733,stroke:#4aa3ff,color:#cfe2ff;
+      </div>
+      <div class="anns">
+        <div><b>All input types:</b> PDF / Word / Excel / image → digital files read directly; <b>image-only scans → page image + OCR</b>, then extracted by the <b>vision model</b></div>
+        <div><b>Classify &amp; route:</b> rules scorer → escalate to an LLM if unsure → each <b>type routed to its own extractor + schema</b>; non-invoices caught here</div>
+        <div><b>3 failure cases:</b> ⓐ bad schema → re-ask → escalate → human · ⓑ scan → VLM · ⓒ flaky API → retry</div>
+        <div><b>Store → use:</b> Silver/Gold feed reporting, search, summarization, aggregation</div>
+        <div><b>Gets better:</b> escalated + human-fixed cases feed the eval loop → accuracy improves on the firm's own docs</div>
+        <div><b>Audit:</b> every 📝 decision is written to the trail</div>
+      </div>
+      <div class="sfoot"><b>Part 2 builds the deep slice:</b> the PDF-invoice path (text-layer check → LLM/VLM extract → DSPy/Pydantic validate → async API), behind a job-id-then-poll endpoint.</div>
+    </div>
+    <div class="notes">
+      <div class="nlab">Talk-track — Slide B</div>
+      Follow the green "yes" line — that's the easy ~90%, handled fast and cheap. At each checkpoint, if the system isn't confident it <b>escalates to a stronger model</b> instead of guessing, and a genuine failure goes to a person. The brief's three required failure modes are all here: unparseable output re-asks then escalates, image-only scans go to the vision model, and flaky API calls retry with back-off. Validated data lands in Delta and powers reporting, search, and the future Q&A. And because every escalation and human correction is captured, the system <b>improves on the firm's actual documents over time</b> — a POC that's a hypothesis, not a one-off.
+    </div>
+
+    <div class="card"><b>✓ Constraints this slide answers (from the brief):</b>
+      <div class="anns" style="margin-top:8px">
+        <div>Step-by-step: ingest → classify → process ✓</div>
+        <div>Stores results for reporting · search · summarization · aggregation ✓</div>
+        <div>Separation: doc handling / LLM (DSPy) / validation ✓</div>
+        <div>Handles unparseable output (ⓐ) ✓</div>
+        <div>Handles image-only scans (ⓑ) ✓</div>
+        <div>Handles transient API failures (ⓒ) ✓</div>
+        <div>Async: job id now, poll for result (Task 3) ✓</div>
+        <div>Structured logging at each step (📝 audit) ✓</div>
+      </div>
+    </div>
+
+    <div class="callout"><strong>Where the detail lives:</strong> this is the compressed submission. The full reasoning, trade-offs, citations, and the "what I'd validate with your data" risks are in the rest of this site — e.g. <a href="architecture.html">②</a>, <a href="storage-audit.html">⑤</a>, <a href="eval.html">Evaluation</a>, <a href="decisions.html">⑧ Decisions</a>.</div>
+
+    <div class="pagenav">
+      <a href="index.html">⌂ Overview</a>
+      <a href="case.html">① The Case →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

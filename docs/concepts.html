@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>★ Concepts & Glossary</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Reference</div>
+    <h1>Concepts &amp; Glossary</h1>
+    <p class="lead">Reference for every concept behind the design, the research, and the solution — defined plainly, with why it matters for this case and a one-line summary. Start here if a term anywhere in the documentation is unfamiliar.</p>
+
+    <h2>Design concepts (our solution)</h2>
+    <p class="lead">The handful of ideas the whole architecture is built on.</p>
+
+    <div class="card">
+      <h3>Confidence-gated escalation (a "cascade")</h3>
+      <p style="font-size:13.5px">At each step, try the cheap/deterministic path first; if it isn't confident, escalate to a stronger model; if that's still unsure, hand to a human. <b>Why for this case:</b> it gives all three things at once — graceful failure (never a silent wrong answer), low cost, and low latency. It's the spine of both slides, and it's the published <i>cascade</i> idea from FrugalGPT.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"Cheap path for the easy majority, escalate only when the model isn't sure, human as the last resort."</i></p>
+    </div>
+    <div class="card">
+      <h3>Model tiering</h3>
+      <p style="font-size:13.5px">The escalation in concrete terms: a fast default model (tier-1, <code>gemini-3-5-flash</code>) handles most documents; only low-confidence ones reach the premium model (tier-2, <code>claude-opus-4-8</code>). <b>Why:</b> one dial that serves both speed and quality — and with DSPy, swapping a tier is a one-line change.</p>
+    </div>
+    <div class="card">
+      <h3>Classification-guided extraction</h3>
+      <p style="font-size:13.5px">Figure out <i>what the document is</i> first, then extract with logic tailored to that type — rather than asking one model to do both at once. <b>Why:</b> it's more accurate and needs far less labelled data (a 2026 Nature paper shows ~18 F1 points better, zero-shot), and it lets the cheap classifier filter out non-invoices before the expensive extractor runs.</p>
+    </div>
+    <div class="card">
+      <h3>The input guard</h3>
+      <p style="font-size:13.5px">Because the classifier runs first, "is this actually an invoice?" is a free check: a contract sent to the invoice extractor is <b>rejected with a reason</b> instead of having invoice fields hallucinated onto it. <b>Why:</b> a failure-handling win that costs nothing extra.</p>
+    </div>
+    <div class="card">
+      <h3>Graceful degradation</h3>
+      <p style="font-size:13.5px">The system is never allowed to be <i>confidently wrong</i>. Anything it can't handle with confidence is escalated, and ultimately flagged for a person — every such decision recorded. <b>Why:</b> for a legal client, a flagged uncertainty is safe; a silent fabrication is not.</p>
+    </div>
+    <div class="card">
+      <h3>Async "accept-and-poll" (HTTP 202)</h3>
+      <p style="font-size:13.5px">The API takes the file, returns a <b>job id immediately</b>, does the slow extraction on a background worker, and lets the client <b>poll</b> for the result. <b>Why:</b> extraction takes seconds, so this keeps user-facing latency tiny and survives load — exactly what Task 3 means by "real-world latency."</p>
+    </div>
+    <div class="card">
+      <h3>The audit trail, in layers</h3>
+      <p style="font-size:13.5px">Different audit questions need different evidence: our append-only <b>event log</b> (state changes), Delta <b>history/time-travel</b> (data history), Unity Catalog <b>lineage</b> (where a field came from), UC <b>access logs</b> (who looked), and <b>MLflow</b> (how the model produced a value). <b>Why:</b> the case grades the data model on the audit trail, and four of those five are Databricks-native — see <a href="storage-audit.html">⑤</a>.</p>
+    </div>
+    <div class="card">
+      <h3>RAG (retrieval-augmented generation)</h3>
+      <p style="font-size:13.5px">For future Q&A/summarization: <b>retrieve</b> the most relevant passages (by meaning, via embeddings), then ask an LLM to answer <i>over those passages</i> with citations. <b>Why:</b> it's how the "extensibility" requirement gets satisfied later without a re-architecture — see <a href="extensibility.html">⑥</a>.</p>
+    </div>
+
+    <h2>Pipeline / ML</h2>
+    <div class="card">
+      <h3>TF-IDF</h3>
+      <p style="font-size:13.5px">Turns text into numbers by scoring each word by how often it appears here × how rare it is everywhere. Distinctive words ("remittance") score high, "the" scores ~0 — giving a cheap classifier something to work with. <b>In our plan:</b> rung 2 of the classification ladder.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"TF-IDF weights words by how distinctive they are, so a lightweight model separates invoices from contracts without an LLM."</i></p>
+    </div>
+    <div class="card">
+      <h3>kNN (k-Nearest Neighbors)</h3>
+      <p style="font-size:13.5px">Classify a new document by finding the most similar already-labeled ones and taking a majority vote — no training, just comparison in vector space. <b>In our plan:</b> a rung-3 option, riding on embeddings.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"kNN labels a doc by looking at the most similar labeled docs and voting."</i></p>
+    </div>
+    <div class="card">
+      <h3>Embeddings</h3>
+      <p style="font-size:13.5px">A model that turns text into a vector where similar <i>meaning</i> lands nearby — so "invoice" and "bill" are close even though the words differ. <b>In our plan:</b> the basis for future semantic search/Q&A; endpoints <code>bge-large-en</code>, <code>gte-large-en</code>.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"Embeddings map text to vectors where closeness means similar meaning — that's what powers semantic search."</i></p>
+    </div>
+    <div class="card">
+      <h3>VLM &amp; OCR</h3>
+      <p style="font-size:13.5px"><b>OCR</b> reads characters off an image (deterministic, fails by garbling characters). A <b>VLM</b> is an LLM that can see images and reason over layout (higher accuracy, but can hallucinate). <b>In our plan:</b> OCR reads scans for classification; the VLM extracts hard scans — tier-1 <code>gemini-3-5-flash</code>, escalate to <code>claude-opus-4-8</code>.</p>
+    </div>
+
+    <h2>Framework / tooling</h2>
+    <div class="card">
+      <h3>DSPy</h3>
+      <p style="font-size:13.5px">Program an LLM with a <b>typed signature</b> — declare the inputs and a Pydantic output schema — instead of hand-written prompt strings; DSPy coerces the reply into that type. <b>In our plan:</b> it's the LLM interface and the validation contract in one object, which is exactly the separation the brief asks for. Under the hood it coerces output via a Pydantic <code>TypeAdapter</code>; on a bad parse it raises its <i>own</i> <code>AdapterParseError</code> (not raw <code>pydantic.ValidationError</code>) — that's the catch point for failure case ⓐ.<sup class="src"><a href="https://dspy.ai/learn/programming/signatures/" target="_blank">[1]</a></sup></p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"DSPy makes the model's output a typed contract, so validation is built into the interface rather than bolted on."</i></p>
+    </div>
+    <div class="card">
+      <h3>MLflow tracing</h3>
+      <p style="font-size:13.5px">Auto-records every LLM call — input, prompt, model+version, output, tokens, latency — as a durable trace. <b>In our plan:</b> the model-audit layer (paired with the business event log), so each extraction is reproducible. DSPy emits these automatically.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"MLflow tracing captures every model call end-to-end, so each extraction is reproducible — critical for legal."</i></p>
+    </div>
+    <div class="card">
+      <h3>Pydantic</h3>
+      <p style="font-size:13.5px">Defines data shapes as typed classes and validates against them, raising a clear error on bad data. <b>In our plan:</b> the <code>Invoice</code> schema is a Pydantic model — the single source of truth shared by the DSPy signature and the validator. It <i>is</i> "the expected schema."</p>
+    </div>
+
+    <h2>Platform / ops</h2>
+    <div class="card">
+      <h3>CI/CD</h3>
+      <p style="font-size:13.5px"><b>CI</b> runs your tests automatically on every push, so broken code is caught immediately. <b>CD</b> auto-deploys what passes — for us, <code>databricks bundle deploy</code> stands up the app. <b>In our plan:</b> the "platform maturity" line on Slide A — repeatable, auditable releases; bad code never reaches the workspace.</p>
+      <p style="font-size:13px"><span class="pro">In one line:</span> <i>"CI tests every push; CD auto-deploys what passes via a Databricks Asset Bundle — releases stay reproducible and safe."</i></p>
+    </div>
+    <div class="card">
+      <h3>Medallion (Bronze / Silver / Gold)</h3>
+      <p style="font-size:13.5px">A layering convention: Bronze = raw, Silver = cleaned/validated, Gold = business-ready aggregates — each a set of Delta tables. <b>In our plan:</b> maps onto the pipeline and gives the audit story via Delta time-travel.</p>
+    </div>
+    <div class="card">
+      <h3>Delta · Unity Catalog · Vector Search</h3>
+      <p style="font-size:13.5px"><b>Delta</b> = the table format (transactions + time-travel history). <b>Unity Catalog</b> = governance (permissions, lineage). <b>Vector Search</b> = an index over embeddings for fast semantic lookup. <b>In our plan:</b> audit, legal confidentiality, and future Q&A respectively.</p>
+    </div>
+
+    <h2>Research grounding — why we took these ideas</h2>
+    <p class="lead">Three papers underpin the design. We read them for the <i>main idea</i> only — this is a case study, not a reproduction — and each one maps onto a choice we'd already reasoned our way to.</p>
+
+    <div class="card">
+      <h3>FrugalGPT — the cascade <span class="tag">Stanford, 2023</span></h3>
+      <p style="font-size:13.5px"><b>Main idea:</b> query a cheap model first, <i>score</i> its answer with a tiny scorer, and only escalate to a pricier model if the score is below a learned threshold. A 3-model cascade matched GPT-4 at <b>up to ~98% lower cost</b>.</p>
+      <p style="font-size:13px"><b>What we took &amp; why:</b> this <i>is</i> our confidence-gated escalation (tier-1 fast → escalate to tier-2). It's the published basis for "fast and cheap on the easy majority, premium only on the hard tail" — our cost <i>and</i> latency story. (Bonus: one of their test sets, OVERRULING, is legal text.)<sup class="src"><a href="https://arxiv.org/abs/2305.05176" target="_blank">[1]</a></sup></p>
+    </div>
+
+    <div class="card">
+      <h3>Seeing is Believing? (KIE-HVQA) — the failure mode <span class="tag">ByteDance, NeurIPS 2025</span></h3>
+      <p style="font-size:13.5px"><b>Main idea:</b> under visual degradation (blur, occlusion), vision-language models lean on language priors and <b>hallucinate</b> plausible-but-wrong document values instead of admitting they can't read it. They build a benchmark (KIE-HVQA) and train a model — via reinforcement learning with a reward for <i>refusing when unsure</i> — that beats GPT-4o by <b>~28%</b> on hallucination-free accuracy under degradation.</p>
+      <p style="font-size:13px"><b>What we took &amp; why:</b> the evidence for two of our calls — use deterministic OCR (not a VLM) to <i>classify</i> scans, and route low-confidence scans to escalation/human rather than letting a model guess. Signal uncertainty, don't fabricate.<sup class="src"><a href="https://arxiv.org/abs/2506.20168" target="_blank">[2]</a></sup></p>
+      <p style="font-size:13px"><span class="wt">📦 Usable data:</span> KIE-HVQA is public on HuggingFace and includes <b>invoices with simulated degradation</b> — an off-the-shelf eval set for our scan / hallucination handling. <a href="https://huggingface.co/datasets/bytedance-research/KIE-HVQA" target="_blank">huggingface.co/datasets/bytedance-research/KIE-HVQA</a></p>
+    </div>
+
+    <div class="card">
+      <h3>Classification-guided LVLM — the architecture <span class="tag">Nature Sci. Reports, 2026</span></h3>
+      <p style="font-size:13.5px"><b>Main idea:</b> for mixed document types, <b>decouple</b> type-classification from extraction — classify first (they even offer a <i>training-free keyword classifier over OCR text</i>), inject a type-specific prompt, then run the vision-language model. Zero-shot, it beat a supervised baseline by <b>~18 F1 points</b>.</p>
+      <p style="font-size:13px"><b>What we took &amp; why:</b> the whole shape of our pipeline — classify → route → type-specific extract — <i>and</i> our keyword-over-OCR classifier (decision C) is literally their training-free option. Peer-reviewed proof that our architecture and our cheap classifier are the accurate, low-supervision design.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[3]</a></sup></p>
+      <p style="font-size:13px"><span class="wt">📦 Usable code:</span> their Multi-VIE code and a fine-tuned Qwen2.5-VL model are public. <a href="https://github.com/FairmeHIT/Multi-VIE" target="_blank">github.com/FairmeHIT/Multi-VIE</a></p>
+    </div>
+
+    <h2>Models we could evaluate</h2>
+    <p class="lead">Keep these as benchmark candidates — we can A/B several later against the same invoices (the KIE-HVQA degraded set is ready-made for it).</p>
+    <div class="card">
+      <h3>In use today — the two tiers</h3>
+      <p style="font-size:13.5px"><code>gemini-3-5-flash</code> (fast default) and <code>claude-opus-4-8</code> (premium escalation). Both are Databricks-native and callable now, so the POC runs on these.</p>
+    </div>
+    <div class="card">
+      <h3>Specialist candidate — Qwen2.5-VL-7B-SFT (Multi-VIE)</h3>
+      <p style="font-size:13.5px">The Nature team's vision model, <b>fine-tuned for exactly this task</b> (multi-type visual information extraction) and public on HuggingFace. A strong thing to evaluate for the extractor / tier-2 slot — after fine-tuning it reached <b>93.65% F1</b> on their dataset, and showed robustness to seals, watermarks, and low contrast. <a href="https://huggingface.co/fairme/Qwen2.5-VL-7B-SFT" target="_blank">model</a></p>
+      <p style="font-size:13px"><span class="wt">⚠ Caveat:</span> serving a custom GPU model needs a <b>paid</b> Databricks workspace — Free Edition is serverless with no GPU / custom-model serving. So it's a <b>production-tier candidate</b> (or for offline eval), not something we stand up on Free Edition for the POC. Fits the "POC on free, production on paid — same code, same bundle" framing.</p>
+    </div>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] Chen, Zaharia, Zou, <i>FrugalGPT</i>, arXiv 2305.05176 (Stanford, 2023). <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
+      <li>[2] He et al., <i>Seeing is Believing? Mitigating OCR Hallucinations in MLLMs</i>, arXiv 2506.20168 (ByteDance, NeurIPS 2025). <a href="https://arxiv.org/abs/2506.20168" target="_blank">arxiv.org/abs/2506.20168</a></li>
+      <li>[3] Li et al., <i>Visual information extraction via classification-guided LVLMs</i>, Sci. Reports s41598-026-49319-z (2026). <a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">nature.com</a></li>
+      <li>[4] DSPy signatures + MLflow DSPy tracing. <a href="https://dspy.ai/learn/programming/signatures/" target="_blank">dspy.ai</a> · <a href="https://mlflow.org/docs/latest/genai/tracing/integrations/listing/dspy/" target="_blank">mlflow.org</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="index.html">⌂ Overview</a>
+      <a href="decisions.html">⑧ Decisions & Open Qs →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

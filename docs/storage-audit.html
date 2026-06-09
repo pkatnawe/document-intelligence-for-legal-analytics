@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⑤ Storage & Audit</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Part 1 · Architecture</div>
+    <h1>Storage &amp; Audit Trail</h1>
+    <p class="lead">The brief grades the data model on one thing: does it support an audit trail? The approach is to map each question an auditor will ask to a <b>native Databricks primitive</b> — most are configured, not built, which is a key reason for choosing Databricks.</p>
+    <div class="tldr"><div class="tlh">TL;DR</div><ul>
+      <li>Six audit questions, each answered by a native primitive: <b>Delta history/time-travel</b>, <b>Unity Catalog lineage &amp; access logs</b>, <b>MLflow tracing</b>.</li>
+      <li>Plus one append-only event log (the only piece built) for the permanent record of state changes.</li>
+      <li>The audit trail is <b>configured, not constructed</b> — four of the six answers ship with the platform.</li>
+    </ul></div>
+
+    <h2>How the data is layered</h2>
+    <p>We use the <b>medallion</b> pattern on Delta tables: <b>Bronze</b> = raw documents as received, <b>Silver</b> = validated, structured extractions, <b>Gold</b> = business-ready aggregates for reporting and totals. <b>Unity Catalog</b> governs all of it — which doubles as the confidentiality boundary a legal firm needs, so one client's documents never appear in another's view.</p>
+
+    <h2>The audit trail — five native layers</h2>
+    <p>Different auditor questions need different evidence. Each arrow below lands in a Databricks feature built for exactly that question:</p>
+    <div class="mermaid">
+flowchart LR
+  subgraph EV["The pipeline emits…"]
+    direction TB
+    E1["📝 a state change"]:::n
+    E2["💾 a data write"]:::n
+    E3["🧠 a model call"]:::n
+    E4["👁️ a data access"]:::n
+  end
+  E1 --> L1[("Append-only event log<br/>Delta table, never deleted")]:::d
+  E2 --> L2["Delta history + time-travel"]:::d
+  E2 --> L3["Unity Catalog lineage"]:::d
+  E3 --> L4["MLflow tracing"]:::aud
+  E4 --> L5["UC system.access.audit"]:::d
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">Left: the four kinds of thing our pipeline does. Right: where each is recorded. Four of the five are Databricks-native — we only build the first one (a simple append-only table).</p>
+
+    <table>
+      <tr><th>What an auditor asks</th><th>Databricks primitive that answers it</th></tr>
+      <tr><td>"Who changed this document's <b>state</b>, and when?"</td><td>Our <b>append-only event log</b> — an immutable Delta table (the one piece we build)</td></tr>
+      <tr><td>"What did the <b>data</b> look like at time T?"</td><td>Delta <b>time-travel</b> — query <code>TIMESTAMP AS OF</code> any past version<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/delta/history" target="_blank">[1]</a></sup></td></tr>
+      <tr><td>"Who/what/when <b>wrote</b> this table?"</td><td>Delta <b>DESCRIBE HISTORY</b> — version, <code>userName</code>, <code>operation</code>, timestamp per write<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/delta/history" target="_blank">[1]</a></sup></td></tr>
+      <tr><td>"Where did this <b>field</b> come from?"</td><td><b>Unity Catalog lineage</b> — automatic, column-level, no instrumentation<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/data-governance/unity-catalog/data-lineage" target="_blank">[2]</a></sup></td></tr>
+      <tr><td>"Who <b>accessed</b> this client's data?"</td><td>UC audit logs — the <code>system.access.audit</code> system table<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/audit-logs" target="_blank">[3]</a></sup></td></tr>
+      <tr><td>"How did the model <b>produce</b> this value?"</td><td><b>MLflow tracing</b> — exact input → prompt → output, per call<sup class="src"><a href="https://mlflow.org/docs/latest/genai/tracing/integrations/listing/dspy/" target="_blank">[4]</a></sup></td></tr>
+    </table>
+
+    <div class="callout win"><strong>Why Databricks for audit:</strong> the brief requires a data model that supports the audit trail. On most stacks, lineage, history, and access logging are custom builds. Here, four of the six answers above are platform features — the audit trail is configuration, not construction.</div>
+
+    <h2>Limitations</h2>
+    <p><b>Delta history isn't a forever-record by default.</b> Table history retention defaults to ~30 days (<code>logRetentionDuration</code>), and UC audit logs default to 90 days (and are in Public Preview).<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/delta/history" target="_blank">[1]</a></sup> So the <i>permanent</i> legal record is our <b>append-only event-log table</b> — a Delta table we simply never delete from — with retention extended on the tables that need it. For row-level change capture we can also enable Delta <b>Change Data Feed</b>.<sup class="src"><a href="https://learn.microsoft.com/en-us/azure/databricks/delta/delta-change-data-feed" target="_blank">[5]</a></sup></p>
+    <details>
+      <summary>And one design nuance: job status doesn't live in Delta</summary>
+      <p style="font-size:13.5px">Delta is built for appends + history, not for a row updated constantly (a job flicking PENDING→RUNNING→DONE while it's polled). At POC volume we keep it in Delta for simplicity; at high poll volume, job status moves to a transactional store while Delta keeps the append-only audit and results. (Local dev writes Delta via delta-rs, no Spark; deployed uses Unity Catalog tables.)</p>
+    </details>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] <i>Work with table history</i> — DESCRIBE HISTORY returns version/userName/operation/timestamp; time travel via TIMESTAMP/VERSION AS OF; default ~30-day history retention. <a href="https://learn.microsoft.com/en-us/azure/databricks/delta/history" target="_blank">delta/history</a></li>
+      <li>[2] <i>Data lineage in Unity Catalog</i> — automatic, table- and column-level, captured from execution with no code instrumentation. <a href="https://learn.microsoft.com/en-us/azure/databricks/data-governance/unity-catalog/data-lineage" target="_blank">unity-catalog/data-lineage</a></li>
+      <li>[3] <i>Audit log system table</i> — <code>system.access.audit</code> records access events (default 90-day retention; Public Preview). <a href="https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/audit-logs" target="_blank">system-tables/audit-logs</a></li>
+      <li>[4] MLflow DSPy tracing — autologs every model call. <a href="https://mlflow.org/docs/latest/genai/tracing/integrations/listing/dspy/" target="_blank">mlflow.org</a></li>
+      <li>[5] <i>Delta change data feed</i> — row-level insert/update/delete tracking between versions. <a href="https://learn.microsoft.com/en-us/azure/databricks/delta/delta-change-data-feed" target="_blank">delta/delta-change-data-feed</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="classification.html">← ④ Classification</a>
+      <a href="extensibility.html">⑥ Extensibility & Scale →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# Databricks Apps runtime configuration (must sit at the project root).
+command: ["python", "app.py"]
+
+env:
+  # Auth for calling serving endpoints + the SQL warehouse.
+  # The PAT is stored in a Databricks secret (scope `invoice_poc`, key `databricks_token`)
+  # and injected via `valueFrom` — never committed. Databricks Apps also inject the app
+  # service principal's OAuth (CLIENT_ID/SECRET); force PAT so the SDK uses this token and
+  # doesn't error on "more than one auth method".
+  #   databricks secrets put-secret invoice_poc databricks_token --string-value <PAT>
+  - name: DATABRICKS_AUTH_TYPE
+    value: "pat"
+  - name: DATABRICKS_HOST
+    value: "https://dbc-bb185e3a-c061.cloud.databricks.com"
+  - name: DATABRICKS_TOKEN
+    valueFrom: "databricks-token"
+
+  # Model tiers. Free Edition serves only open-weight models, so the POC uses gemma
+  # (vision) + llama (text). Production swaps these back to Gemini/Claude — same code.
+  - name: TIER1_MODEL
+    value: "databricks-gemma-3-12b"
+  - name: TIER2_MODEL
+    value: "databricks-meta-llama-3-3-70b-instruct"
+
+  # Delta-backed store (Unity Catalog) via a serverless SQL warehouse.
+  - name: WAREHOUSE_ID
+    value: "23ebe67c53c1d192"
+  - name: UC_CATALOG
+    value: "workspace"
+  - name: UC_SCHEMA
+    value: "invoice_poc"

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>① Case Overview</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">① Case Overview</div>
+    <h1>Case Overview</h1>
+    <p class="lead">A legal firm's Claims operation runs on paper — invoices, contracts, meeting minutes, emails — arriving as PDFs, Word, Excel, and scanned images. Today a person reads each one by hand. The goal is to turn that pile into <b>structured, queryable, trustworthy data</b>, so the firm spends its hours on judgment, not data entry.</p>
+
+    <div class="tldr">
+      <div class="tlh">Key takeaways</div>
+      <ul>
+        <li><b>Problem:</b> manual document handling costs an estimated <span class="metric">$15–25 per invoice</span>, all non-billable time.</li>
+        <li><b>Goal:</b> ingest any format, extract the key entities (clients, amounts, dates, parties), and store them with a full audit trail — extensible to summarization/Q&A later.</li>
+        <li><b>Graded on:</b> judgment and failure-handling — delivered as two architecture slides plus a PDF-invoice service and async API.</li>
+      </ul>
+    </div>
+
+    <h2>The real problem (why this matters to the firm)</h2>
+    <p>This isn't "extract some fields." It's an operations problem with money attached. Manual invoice handling alone runs an estimated <b>$15–25 per document</b><sup class="src"><a href="cost.html">[see Cost]</a></sup>, and every hour a lawyer or paralegal spends filing and re-keying is a non-billable hour. The documents are messy and inconsistent, they have to be findable later, and — because this is legal — every step has to be <b>defensible</b>: you must be able to show how a number was produced and who touched it.</p>
+    <p>The system augments the team rather than replacing it: <b>people apply judgment; the system handles the mechanical reading at speed and scale.</b> It extracts what it can, flags what it is unsure about for human review, and leaves a complete audit trail behind.</p>
+
+    <h2>What we're graded on — three deliverables</h2>
+    <table>
+      <tr><th>#</th><th>Deliverable</th><th>Scope</th></tr>
+      <tr><td>1</td><td><b>Two slides</b> — the architecture, and the execution pipeline</td><td><b>All</b> document types (breadth)</td></tr>
+      <tr><td>2</td><td><b>A Python service</b> — extract header + line-items via LLM/VLM, handling bad output, image-only scans, and flaky API calls</td><td><b>PDF invoices only</b> (depth)</td></tr>
+      <tr><td>3</td><td><b>An async API</b> — submit a PDF, get a job id instantly, poll for the result</td><td>PDF invoices</td></tr>
+    </table>
+    <p>Part 1 is a <b>wide</b> design exercise; Part 2 is a <b>narrow</b> build. We keep them apart so the platform vision doesn't bloat the code.</p>
+
+    <h2>The real constraints (the project as a whole)</h2>
+    <p>Everything we design has to answer these — they come straight from the brief, and they're the lens for every decision in this site:</p>
+    <table>
+      <tr><th>Constraint</th><th>What it really demands</th></tr>
+      <tr><td><b>Diverse documents</b></td><td>Ingest + classify many types and formats (PDF/Word/Excel/image), including scans with no text layer</td></tr>
+      <tr><td><b>Failure at every stage</b></td><td>Never a silent wrong answer — escalate when unsure, fall back to a human, record everything</td></tr>
+      <tr><td><b>Scale to large volumes</b></td><td>Throughput grows without a rewrite as the firm sends more</td></tr>
+      <tr><td><b>Audit trail</b></td><td>A data model that proves who/what/when, and how each value was produced</td></tr>
+      <tr><td><b>Downstream use</b></td><td>Results feed reporting, search, summarization, and aggregation</td></tr>
+      <tr><td><b>Extensibility</b></td><td>Room to add LLM summarization / Q&A later without re-architecting</td></tr>
+      <tr><td><b>Confidentiality</b> <span class="tag">implied</span></td><td>Legal data is sensitive — governance over who sees what, and what may go to a model</td></tr>
+    </table>
+
+    <div class="callout"><strong>The rubric, in their words:</strong> <i>"We are not looking for a production-complete implementation. We are looking for the logic and judgment in how you structure the service and handle cases where things go wrong."</i> Clean structure and graceful failure beat feature count — every decision here is measured against this.</div>
+
+    <h2>Why Databricks</h2>
+    <p>The case doesn't require Databricks — it's our choice, because the constraints above map onto things it gives us <i>natively</i>: <b>Apps</b> host the API, <b>Foundation Model APIs</b> do the LLM/VLM work, <b>Delta + Unity Catalog</b> handle storage, audit, and confidentiality, and <b>Workflows</b> handle scale. The audit trail especially is configuration, not construction (see <a href="storage-audit.html">⑤</a>).</p>
+    <p><b>Deployment note:</b> the proof-of-concept runs on Databricks <b>Free Edition</b> — serverless-only, outbound internet limited to trusted domains, non-commercial.<sup class="src"><a href="https://docs.databricks.com/aws/en/getting-started/free-edition-limitations" target="_blank">[1]</a></sup> Production moves to a paid workspace using the same code and the same deployment bundle.</p>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] <i>Databricks Free Edition limitations</i> — serverless-only, trusted-domain egress, non-commercial. <a href="https://docs.databricks.com/aws/en/getting-started/free-edition-limitations" target="_blank">docs.databricks.com</a></li>
+      <li>Manual invoice-handling cost ($15–25/doc) and the IDP market context — see the <a href="cost.html">Cost &amp; ROI</a> page.</li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="index.html">← Overview</a>
+      <a href="slides.html">▣ The Two Slides →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

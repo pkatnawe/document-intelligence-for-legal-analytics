@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>② Platform · Slide A</title>
+<link rel="stylesheet" href="assets/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Part 1 · Slide A</div>
+    <h1>Platform Architecture</h1>
+    <p class="lead">The high-level slide: one picture of the whole system, with the three things the brief asks about — failure handling, scale, and audit — marked on it.</p>
+    <div class="tldr"><div class="tlh">TL;DR</div><ul>
+      <li>One pipeline serves <b>all document types</b>; uncertain cases escalate to a stronger model, then to a human.</li>
+      <li>The cheap path handles <span class="metric">~90%</span> of documents; the premium model runs only on the hard tail.</li>
+      <li>Failure handling, horizontal scale, and a <b>Databricks-native audit trail</b> are built into the design.</li>
+    </ul></div>
+
+    <div class="mermaid">
+flowchart TB
+  subgraph ING["① Ingest — PDF · Word · Excel · image"]
+    A1["📥 Upload / API"]:::n
+    A2["📨 Batch / email drop"]:::n
+  end
+  subgraph LAND["② Landing — keep the original"]
+    B1[("🗄️ Raw doc + metadata 📝")]:::d
+  end
+  subgraph CLS["③ Classify (rules → LLM if unsure) &amp; route by type"]
+    C1{"🔎 Document type? 📝"}:::dec
+  end
+  subgraph EXT["④ Type-specific extractors (LLM / VLM)"]
+    E1["🧾 Invoice"]:::n
+    E2["📑 Contract"]:::n
+    E3["✉️ Email / Minutes"]:::n
+  end
+  subgraph VAL["⑤ Check it"]
+    V1{"✅ Looks right? 📝"}:::dec
+  end
+  subgraph STORE["⑥ Store — clean &amp; queryable"]
+    S1[("💾 Validated + aggregates 📝")]:::d
+  end
+  subgraph USE["⑦ Use it"]
+    G1["📊 Reports · search · summaries · totals"]:::n
+  end
+  A1 & A2 --> B1 --> C1
+  C1 -->|"invoice"| E1
+  C1 -->|"contract"| E2
+  C1 -->|"email / minutes"| E3
+  C1 -->|"not sure"| Q["🚩 Human review 📝"]:::err
+  E1 & E2 & E3 --> V1
+  V1 -->|yes| S1 --> G1
+  V1 -->|"no"| Q
+  AUD[["📝 Audit trail (Databricks-native)<br/>append-only log · Delta history · UC lineage · MLflow"]]:::aud
+  B1 -.-> AUD
+  C1 -.-> AUD
+  V1 -.-> AUD
+  S1 -.-> AUD
+  Q -.-> AUD
+  classDef n fill:#161d26,stroke:#2b3744,color:#e6edf3;
+  classDef d fill:#10243a,stroke:#2f6feb,color:#cfe2ff;
+  classDef dec fill:#2a2113,stroke:#d29922,color:#ffe2a8;
+  classDef err fill:#2a1416,stroke:#f85149,color:#ffc9c9;
+  classDef aud fill:#1a1430,stroke:#a371f7,color:#e0d4ff;
+    </div>
+    <p style="font-size:13.5px;color:var(--mut)">Seven numbered stages: <b>ingest → keep the original → classify → extract → check → store → use.</b> The key detail is the middle: <b>classify</b> uses a cheap rules scorer and only escalates to an LLM when it's unsure, and from there <b>each document type is routed to its own extractor and schema</b> (invoice, contract, email/minutes) — that's how we handle the firm's mix of formats. Anything uncertain (unknown type, or output that fails the check) goes to <b>human review</b>, never guessed. The purple lane is the audit trail every 📝 step writes to — mostly <b>Databricks-native</b> (Delta history, Unity Catalog lineage, MLflow), so any document's full history reconstructs without us building a logging system. Detail in <a href="storage-audit.html">⑤</a>.</p>
+
+    <div class="callout"><strong>All input types — and the image-only case, handled explicitly:</strong> PDF, Word, Excel, and images all enter the same pipeline. The split that matters is <b>text layer or not</b> — digital files are read directly; <b>image-only scans and photos are rendered to a page image, OCR'd for classification, and read by the vision model for extraction</b>. "Documents that are just pictures" are a first-class path, not an afterthought.</div>
+
+    <h2>The three things the slide has to answer</h2>
+    <div class="grid3">
+      <div class="card"><h3>⚠ Failure</h3><p style="font-size:13px">Every stage can fail on its own. Anything the system isn't sure about — a doc it can't classify, output that won't validate — is <b>quarantined, not dropped or guessed</b>. Nothing fails silently.</p></div>
+      <div class="card"><h3>📈 Scale</h3><p style="font-size:13px">Ingest is decoupled from extraction, so workers fan out horizontally. Each document is independent, so they can be processed in parallel across many workers.</p></div>
+      <div class="card"><h3>🧾 Audit</h3><p style="font-size:13px">An append-only log records every state change; Delta time-travel records every data change. Together they answer "what happened, and what did the data look like then." Detail in <a href="storage-audit.html">⑤</a>.</p></div>
+    </div>
+
+    <div class="callout win"><strong>⚡ And it's fast:</strong> the API is async (a job id comes back in milliseconds), a cheap model handles the majority while only the hard tail escalates to a premium one, and embeddings are precomputed at ingest. Fast because the slow work is off the request path; accurate because hard docs still reach the premium model — full reasoning in <a href="extensibility.html">⑥</a>.</div>
+
+    <h2>A note on the extract stage</h2>
+    <p>The case names the facts to pull — clients, amounts, dates, parties — so each document type has its own target schema. We express that as a <b>DSPy typed signature</b>: declared inputs, a Pydantic output schema. That single object <i>is</i> both the model interface and the validation contract, which is exactly the "separate LLM interaction from validation" the brief asks for — adding a new document type just means adding a new signature. (More on that idea in <a href="concepts.html">★ Concepts</a>.) Classification stays a <i>separate</i> step from extraction — a decoupling shown to raise accuracy with minimal supervision.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[1]</a></sup></p>
+
+    <h2>Our pipeline vs a peer-reviewed reference architecture</h2>
+    <p class="lead">A 2026 Nature paper proposes the same shape for multi-type document extraction — a quick sanity check that our design is sound, mapped stage by stage.<sup class="src"><a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">[1]</a></sup></p>
+    <table>
+      <tr><th>Nature reference (Li et al., 2026)</th><th>Where it lives in our pipeline</th></tr>
+      <tr><td>Image-classification module — incl. a <i>training-free keyword classifier over OCR text</i></td><td>③ Classify — our rules scorer over OCR text (decision C)</td></tr>
+      <tr><td>Classification also filters out non-target images</td><td>Our "is this an invoice?" input guard</td></tr>
+      <tr><td>ICL prompt tailored to the document type</td><td>A type-specific <b>DSPy signature</b> per doc type</td></tr>
+      <tr><td>LVLM inference + post-processing → structured output</td><td>④ Extract (LLM / VLM) → ⑤ validate against the schema</td></tr>
+      <tr><td>"Conditional computation reduces task uncertainty"</td><td>Confidence-gated escalation</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">Their decoupled, classify-first design beat a supervised baseline by ~18 F1 points <i>zero-shot</i> — so our architecture isn't a guess; it's the published state of the art for exactly this problem. (More on all three papers in <a href="concepts.html">★ Concepts → Research grounding</a>.)</p>
+
+    <h2>How the stack meets the brief's constraints</h2>
+    <p class="lead">The point of every choice is to satisfy something the problem makes explicit. Read this as the "why" behind the diagram — and why Databricks + DSPy specifically.</p>
+    <table>
+      <tr><th>Constraint in the brief</th><th>Our choice</th><th>Why it satisfies it</th></tr>
+      <tr><td>Handle failures at each stage</td><td>Confidence-gated escalation + quarantine + scoped retries</td><td>Nothing is guessed — unsure escalates, then goes to a human; transient errors retry</td></tr>
+      <tr><td>Scale to large volumes</td><td>Async API + Workflows + model tiering</td><td>Slow work runs off the request path, workers fan out, the cheap model absorbs the bulk</td></tr>
+      <tr><td><b>Data model supports the audit trail</b></td><td><b>Databricks-native audit</b> + an append-only event log</td><td>Delta history/time-travel, UC lineage, UC access logs, MLflow — <i>configured, not built</i> <a href="storage-audit.html">⑤</a></td></tr>
+      <tr><td>Downstream querying (reporting, totals)</td><td>Delta medallion → Gold tables</td><td>Plain SQL over clean, validated data</td></tr>
+      <tr><td>Extensibility for summarization / Q&A</td><td>Embeddings + Vector Search + DSPy signatures</td><td>A new capability is a new signature over the same data <a href="extensibility.html">⑥</a></td></tr>
+      <tr><td>Separate doc-handling / LLM / validation</td><td><b>DSPy</b> typed signature (= interface + Pydantic contract)</td><td>The separation is structural — that's <i>why DSPy</i></td></tr>
+      <tr><td>Async API: job id now, result later</td><td>HTTP 202 + background worker + Delta job store</td><td>User-facing latency decoupled from extraction time</td></tr>
+    </table>
+
+    <div class="sources"><b>Sources</b><ol>
+      <li>[1] Li et al., <i>Visual information extraction via classification-guided LVLMs</i>, Sci. Reports s41598-026-49319-z (2026) — decoupling document-type classification from content extraction achieves high accuracy with minimal supervision. <a href="https://www.nature.com/articles/s41598-026-49319-z" target="_blank">nature.com</a></li>
+    </ol></div>
+
+    <div class="pagenav">
+      <a href="case.html">← ① The Case</a>
+      <a href="pipeline.html">③ Execution · Slide B →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

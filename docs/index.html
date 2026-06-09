@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Doc Intelligence · Working Doc</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <nav id="side"></nav>
+  <main>
+    <div class="crumb">Overview</div>
+    <h1>Document Intelligence for Legal Analytics <span class="locked">🔒 design locked · v1 · 2026-06-08</span></h1>
+    <p class="lead">An automated pipeline that turns a legal firm's mixed Claims documents — invoices, contracts, minutes, emails — into structured, queryable, auditable data.</p>
+
+    <div class="tldr">
+      <div class="tlh">Executive summary</div>
+      <ul>
+        <li><b>Outcome:</b> extract the key data from any document format at <span class="metric">~$0.005 per document</span>, versus <span class="metric">$15–25</span> handled by hand.</li>
+        <li><b>How:</b> a cheap, deterministic path handles ~90% of documents; a premium model and human review handle the difficult remainder.</li>
+        <li><b>Trust:</b> nothing is ever silently wrong — uncertain cases escalate, then reach a person, and every step is recorded to a Databricks-native audit trail.</li>
+        <li><b>Improves:</b> accuracy rises on the firm's own documents over time, measured on a fixed evaluation set.</li>
+      </ul>
+    </div>
+
+    <div class="callout win"><strong>▣ The deliverable:</strong> the two slides are on <a href="slides.html"><b>The Two Slides</b></a> (presentation-ready, with speaker notes). The remaining pages are the supporting documentation.</div>
+
+    <p>The work has two parts, kept deliberately separate so the platform design does not inflate the build:</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Part 1 — the architecture</h3>
+        <p style="font-size:13.5px">Two slides covering the <b>whole platform</b> across every document type — failure handling, scale, and audit. Scope: <b>breadth</b>.</p>
+      </div>
+      <div class="card">
+        <h3>Part 2 — the service <span class="b decided">built · deployed</span></h3>
+        <p style="font-size:13.5px">A focused Python service that extracts header + line-items from <b>PDF invoices</b>, behind an async API with an upload UI. Running live on <b>Databricks Apps</b>, persisting to Unity Catalog. Scope: <b>depth</b>. See <a href="task2-service.html">⑨ Service</a>.</p>
+      </div>
+    </div>
+    <p>Breadth on the slides, depth in the code — the rubric rewards judgment over feature count.</p>
+
+    <h2>Where the design stands</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>✅ Known knowns (locked)</h3>
+        <p style="font-size:13px">Classify-then-route by document type · rules-over-text classifier with confidence-gated escalation · DSPy typed extraction · speed-first model tiering (Gemini Flash → Claude Opus) · graceful failure (escalate → human) · Databricks-native audit (Delta history + UC lineage/access + MLflow + append-only log) · medallion storage · async API · eval-driven before & after deploy · POC on Free Edition, production on paid. Full log on <a href="decisions.html">⑧ Decisions</a>.</p>
+      </div>
+      <div class="card open">
+        <h3>❓ Open questions (by design)</h3>
+        <p style="font-size:13px"><b>Sensitive data:</b> what may be sent to which model — for the firm's experts; not built (note: tier-1 Gemini is cross-geo, tier-2 Opus is in-perimeter). <b>Document mix:</b> is it clean enough for OCR-first? <b>Thresholds:</b> tune from real data. All three resolve by testing on the firm's actual documents — see <a href="eval.html">Evaluation</a> &amp; <a href="decisions.html">⑧</a>.</p>
+      </div>
+    </div>
+
+    <h2>Where to start</h2>
+    <p>New here? Read <a href="case.html">① The Case</a> first, then walk the sidebar top to bottom. Each card below is a one-line map.</p>
+    <div class="hubgrid">
+      <a class="hubcard" href="slides.html"><div class="h">▣ The Two Slides <span class="locked">deliverable</span></div><p>The actual Task-1 submission — Slide A (architecture) + Slide B (pipeline), with a speaker talk-track.</p></a>
+      <a class="hubcard" href="case.html"><div class="h">① Case Overview</div><p>The real problem and constraints, the three deliverables, and the grading rubric.</p></a>
+      <a class="hubcard" href="architecture.html"><div class="h">② Platform · Slide A</div><p>The whole pipeline on one diagram, with failure / scale / audit called out.</p></a>
+      <a class="hubcard" href="pipeline.html"><div class="h">③ Execution · Slide B</div><p>How a document actually flows through — cheap path first, escalate only when unsure.</p></a>
+      <a class="hubcard" href="classification.html"><div class="h">④ Classification</div><p>Why we sort documents with plain rules, not an LLM — and how scans fit in.</p></a>
+      <a class="hubcard" href="storage-audit.html"><div class="h">⑤ Storage & Audit</div><p>Where results live and how we answer an auditor's two favourite questions.</p></a>
+      <a class="hubcard" href="extensibility.html"><div class="h">⑥ Extensibility & Scale</div><p>Storing data now so future search/Q&A is cheap — plus the latency story.</p></a>
+      <a class="hubcard" href="dev-loop.html"><div class="h">⑦ Dev / Test / Deploy</div><p>Test live models from your laptop; deploy the app last. Connection verified.</p></a>
+      <a class="hubcard" href="eval.html"><div class="h">✓ Evaluation & Improvement</div><p>How we test before deploy, and how the system gets better on the firm's own documents.</p></a>
+      <a class="hubcard" href="cost.html"><div class="h">💵 Cost & ROI</div><p>Real per-document cost (~$0.005) vs ~$15–25 by hand, and how it scales.</p></a>
+      <a class="hubcard" href="concepts.html"><div class="h">★ Concepts & Glossary</div><p>Plain-language definitions for every term, each with a one-line summary.</p></a>
+      <a class="hubcard" href="decisions.html"><div class="h">⑧ Decisions & Open Qs</div><p>The running log of what's settled and what's still open.</p></a>
+      <a class="hubcard" href="task2-service.html"><div class="h">⑨ Service (Part 2) <span class="b decided">built</span></div><p>The built &amp; deployed extraction service — async API, upload UI, the 3 failure cases, Delta/Volume/audit, and anticipated questions.</p></a>
+    </div>
+
+    <div class="pagenav">
+      <span></span>
+      <a href="case.html">① The Case →</a>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

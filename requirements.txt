@@ -1,0 +1,23 @@
+# --- Service runtime ---
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9      # UploadFile / multipart form parsing
+
+# --- LLM / VLM interaction layer ---
+dspy>=2.6                    # typed signatures = model interface + validation contract
+openai>=1.40                # OpenAI-compatible client + transient error types
+databricks-sdk>=0.30        # workspace auth for Foundation Model serving endpoints
+
+# --- Validation, documents, resilience, observability ---
+pydantic>=2.7               # the Invoice data contract (single source of truth)
+pymupdf>=1.24               # text-layer detection + page rendering for scans (no poppler)
+tenacity>=8.2               # retry-with-backoff for transient API errors
+structlog>=24.1             # structured logging
+mlflow>=2.18                # tracing / model-audit layer (mlflow.dspy.autolog)
+
+# --- Optional: Delta-backed store for Databricks (results + audit) ---
+# deltalake>=0.18
+
+# --- Dev / scripts ---
+pytest>=8.0
+requests>=2.31              # scripts/ingest_dataset.py drives the API end-to-end
