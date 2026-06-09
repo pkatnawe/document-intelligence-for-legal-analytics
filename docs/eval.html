@@ -60,6 +60,17 @@ flowchart LR
     </ul>
     <div class="callout"><strong>The plan, in one line:</strong> ship hand-tuned today (no data yet), then let the <b>human-flagged cases</b> accumulate and use them to <b>optimize the prompts with GEPA and tune every threshold</b> to the invoices the system actually sees. GEPA evolves the prompt by reflecting on the exact failures we log, so we don't guess thresholds or prompts up front — we earn them from real data.</div>
 
+    <h2>Why we optimize the text, not the weights</h2>
+    <p>A reasonable engineer asks: why tune <i>prompts</i> instead of fine-tuning a model? Optimizing the text layer (prompts, the schema contract, retrieved context) is a legitimate update mechanism — it changes future behavior in response to new information, the same functional role as a gradient step — and for this problem it's the <i>better</i> one.<sup class="src"><a href="#" onclick="return false" title="Yoonho Lee, We Should Take Text Optimization More Seriously, 2026">[5]</a></sup></p>
+    <table>
+      <tr><th>Property</th><th>Why it fits a legal-Claims POC</th></tr>
+      <tr><td><b>Sample-efficient in the low-data regime</b></td><td>We start with ~no labelled data; short, high-likelihood text has low description length, so it generalises from a handful of examples — exactly why GEPA works from ~10 cases where fine-tuning needs thousands.</td></tr>
+      <tr><td><b>Auditable &amp; reversible</b></td><td>A prompt edit is human-readable, diffable, and revertible — a defensible change record for a legal client. An opaque weight delta is none of those. Text edits also apply weaker, safer optimisation pressure (less overfitting than RL/SFT).</td></tr>
+      <tr><td><b>Reflective "update-time compute"</b></td><td>GEPA (alongside Reflexion / Trace) <i>reads</i> a failed trajectory, diagnoses it, and proposes a revision — spending compute to learn from a single expensive failure. That's ideal when failures are costly and the right behaviour is hard to specify up front — both true here.</td></tr>
+      <tr><td><b>The right routing</b></td><td>Volatile, firm-specific, not-yet-trusted extraction behaviour belongs in the text layer now; only stable, repeatedly-useful knowledge is worth amortising into weights later. The text layer is the staging ground.</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--mut)">So fine-tuning isn't ruled out forever — it's the <i>wrong first move</i>. We elicit and compose the model's existing capability through the text layer, measure it, and only distil into weights once a behaviour is stable and proven on the firm's data.<sup class="src"><a href="#" onclick="return false" title="Yoonho Lee, We Should Take Text Optimization More Seriously, 2026">[5]</a></sup></p>
+
     <div class="callout win"><strong>Why it matters:</strong> a proof-of-concept is a hypothesis, not a delivery. The evaluation harness turns every claim in this documentation — accuracy, hallucination-resistance, latency — into a measured number, and the feedback loop is the concrete answer to how the system improves once it is live.</div>
 
     <div class="sources"><b>Sources</b><ol>
@@ -67,6 +78,7 @@ flowchart LR
       <li>[2] Chen et al., <i>FrugalGPT</i>, arXiv 2305.05176 — cascade thresholds learned from a training set. <a href="https://arxiv.org/abs/2305.05176" target="_blank">arxiv.org/abs/2305.05176</a></li>
       <li>[3] Agrawal et al., <i>GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning</i>, arXiv 2507.19457 (ICLR 2026) — reflective, feedback-driven prompt evolution; outperforms MIPROv2 by ~13% and GRPO by ~20% with up to 35× fewer rollouts, from as few as ~10 examples. <a href="https://arxiv.org/abs/2507.19457" target="_blank">arxiv.org/abs/2507.19457</a></li>
       <li>[4] <code>dspy.GEPA</code> — reflective prompt optimizer; metric returns a score + textual feedback. <a href="https://dspy.ai/api/optimizers/GEPA/overview/" target="_blank">dspy.ai</a></li>
+      <li>[5] Yoonho Lee, <i>We Should Take Text Optimization More Seriously</i> (2026) — the text layer is a legitimate, sample-efficient, auditable update mechanism; reflective optimizers (Reflexion, Trace, GEPA) add an "update-time compute" axis. Essay.</li>
     </ol></div>
 
     <div class="pagenav">
