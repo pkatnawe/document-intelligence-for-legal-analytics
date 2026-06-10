@@ -31,11 +31,16 @@ OUT = Path(__file__).parent
 MODELS = {
     "gemma-3-12b":   ("databricks/databricks-gemma-3-12b",                0.20, 0.20, True),
     "llama-3-3-70b": ("databricks/databricks-meta-llama-3-3-70b-instruct", 0.50, 0.50, False),
+    # Qwen3-VL via HuggingFace Inference Providers (runs on HF's GPUs) — set HF_TOKEN. The id is
+    # the HF repo; the router auto-selects a hosting provider. Prices are rough provider list.
+    "qwen3-vl-8b":   ("openai/Qwen/Qwen3-VL-8B-Instruct",                 0.20, 0.60, True),
+    "qwen3-vl-30b":  ("openai/Qwen/Qwen3-VL-30B-A3B-Instruct",           0.30, 0.90, True),
+    "qwen3-vl-235b": ("openai/Qwen/Qwen3-VL-235B-A22B-Instruct",         0.70, 2.20, True),
     # Unlock by setting the provider's key; vision flag gates the VLM reader.
-    "qwen2-vl-7b":   ("openai/Qwen/Qwen2-VL-7B-Instruct",                 0.20, 0.20, True),    # via TOGETHER/GROQ base_url
     "claude-opus":   ("anthropic/claude-opus-4-8",                       15.00, 75.00, True),
     "gpt-4o":        ("openai/gpt-4o",                                    2.50, 10.00, True),
 }
+HF_ROUTER = "https://router.huggingface.co/v1"  # OpenAI-compatible; routes to Together/Novita/etc.
 
 
 def _build_lm(name: str):
@@ -53,8 +58,12 @@ def _build_lm(name: str):
         return dspy.LM(lid, cache=False, temperature=0.0)
     if lid.startswith("anthropic/"):
         return dspy.LM(lid, cache=False, temperature=0.0) if os.environ.get("ANTHROPIC_API_KEY") else None
+    if name.startswith("qwen3-vl"):
+        # HuggingFace Inference Providers: hosted on HF's GPUs, OpenAI-compatible, HF_TOKEN auth.
+        tok = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")
+        return dspy.LM(lid, cache=False, temperature=0.0, api_base=HF_ROUTER, api_key=tok) if tok else None
     if lid.startswith("openai/"):
-        # Either real OpenAI, or an OpenAI-compatible host (Together/Groq/HF) via OPENAI_BASE_URL.
+        # Real OpenAI, or any OpenAI-compatible host via OPENAI_BASE_URL.
         return dspy.LM(lid, cache=False, temperature=0.0) if os.environ.get("OPENAI_API_KEY") else None
     return None
 

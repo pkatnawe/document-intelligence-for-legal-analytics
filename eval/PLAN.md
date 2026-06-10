@@ -25,7 +25,8 @@ on these invoices, and is the VLM worth its latency/cost?
 ## Axis 2 — Model (the "stronger model" / cost question)
 | Tier | Models | Unlock |
 |------|--------|--------|
-| Open / cheap | `gemma-3-12b` (vision), `llama-3-3-70b` (text), `qwen2-vl-7b` (vision) | gemma/llama live now; Qwen via a Together/Groq key (`OPENAI_API_KEY` + `OPENAI_BASE_URL`) |
+| Open / cheap | `gemma-3-12b` (vision), `llama-3-3-70b` (text) | live now (Databricks) |
+| Open VLM (HF) | `qwen3-vl-8b` / `-30b` / `-235b` (vision) | **`HF_TOKEN`** — runs on HF Inference Providers' GPUs (this machine, a 9 GB Intel Mac, can't run them locally) |
 | Premium / escalation | `claude-opus`, `gpt-4o` | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` |
 
 > **Claude Max ≠ API.** The escalation tier needs an **Anthropic API key** (pay-per-token);

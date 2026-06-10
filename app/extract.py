@@ -1,4 +1,4 @@
-"""Extraction orchestration — the model cascade and the three required failure paths.
+1"""Extraction orchestration — the model cascade and the three required failure paths.
 
 (a) Output that won't fit the schema -> DSPy raises a parse error -> re-ask once on the
     fast model (DSPy does this internally), then escalate to the premium model; if that

@@ -1,4 +1,4 @@
-"""Drive the running service end-to-end the way ingestion would.
+1"""Drive the running service end-to-end the way ingestion would.
 
 Splits the case dataset (one PDF, three invoices) into single-invoice documents and submits
 each to the live API: POST /api/extract returns a job id immediately, then we poll
