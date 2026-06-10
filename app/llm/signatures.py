@@ -54,8 +54,24 @@ class ExtractInvoice(dspy.Signature):
     invoice: Invoice = dspy.OutputField(desc="the structured invoice")
 
 
+# Vision-specific guidance to read amounts row-aligned with labels. NOTE: empirically this
+# does NOT close gemma-3-12b's gap to the OCR path — its weakness is visual reading
+# (misread decimals, shifted columns), not instructions. It's kept because it should help a
+# stronger VLM (Qwen2-VL / GPT-4o / Claude); benchmark before relying on it for a given model.
+_VISION_RULES = """
+READING FROM THE IMAGE
+- Amounts sit in a right-hand column, each on the SAME horizontal row as its label. Match
+  every label to the amount on its own row — do not shift a value up or down a row.
+- Read digits and decimals carefully: each amount has two decimal places (3.17 is 3.17, not
+  31.17). Re-check any amount that looks 10x off its neighbours.
+- A 'Payments' / card-charge section shows how the bill was split across cards — those rows
+  are NOT line items and NOT the total; the charges are the itemized rows above the total.
+"""
+
+
 class ExtractInvoiceVision(dspy.Signature):
-    __doc__ = "Extract structured invoice data (header + line items) from a scanned invoice image.\n\n" + _RULES
+    __doc__ = ("Extract structured invoice data (header + line items) from a scanned invoice image.\n\n"
+               + _RULES + _VISION_RULES)
 
     page_image: dspy.Image = dspy.InputField(desc="rendered page image of a scanned / image-only invoice")
     invoice: Invoice = dspy.OutputField(desc="the structured invoice")
