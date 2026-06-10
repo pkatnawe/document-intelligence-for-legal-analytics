@@ -39,7 +39,8 @@ MODELS = {
 
 
 def _build_lm(name: str):
-    """Build a dspy.LM for a model name, or return None if its credentials are absent."""
+    """Build a dspy.LM for a model name, or return None if its credentials are absent.
+    temperature=0 -> greedy decoding, so the benchmark measures the model, not sampling noise."""
     lid, _, _, _ = MODELS[name]
     if lid.startswith("databricks/"):
         if not os.environ.get("DATABRICKS_API_BASE") or not os.environ.get("DATABRICKS_API_KEY"):
@@ -49,12 +50,12 @@ def _build_lm(name: str):
                 os.environ["DATABRICKS_API_KEY"] = os.environ["DATABRICKS_TOKEN"]
             else:
                 return None
-        return dspy.LM(lid, cache=False)
+        return dspy.LM(lid, cache=False, temperature=0.0)
     if lid.startswith("anthropic/"):
-        return dspy.LM(lid, cache=False) if os.environ.get("ANTHROPIC_API_KEY") else None
+        return dspy.LM(lid, cache=False, temperature=0.0) if os.environ.get("ANTHROPIC_API_KEY") else None
     if lid.startswith("openai/"):
         # Either real OpenAI, or an OpenAI-compatible host (Together/Groq/HF) via OPENAI_BASE_URL.
-        return dspy.LM(lid, cache=False) if os.environ.get("OPENAI_API_KEY") else None
+        return dspy.LM(lid, cache=False, temperature=0.0) if os.environ.get("OPENAI_API_KEY") else None
     return None
 
 
@@ -91,7 +92,8 @@ def _run_config(reader: str, model_name: str, docs) -> dict | None:
                 inputs = {"document_text": text}
             t = time.time()
             try:
-                pred = predictor(**inputs).invoice
+                from app.validation.normalize import normalize_invoice
+                pred = normalize_invoice(predictor(**inputs).invoice)  # same pipeline as the service
                 sc = score(pred, d.gold)
             except Exception as exc:
                 sc = {"overall": 0.0, "fields": {}, "line_items": {"f1": 0.0}, "error": str(exc)[:120]}
@@ -119,18 +121,43 @@ def _ocr_from_doc(d) -> str | None:
     return _ocr_text(doc.page_images_png[0]) if doc.page_images_png else None
 
 
+def _run_config_avg(reader: str, model: str, docs, trials: int):
+    """Run a config `trials` times and average — smooths residual non-determinism."""
+    runs = []
+    for _ in range(max(1, trials)):
+        r = _run_config(reader, model, docs)
+        if r is None or r.get("skipped"):
+            return r
+        runs.append(r)
+    base = dict(runs[-1])
+    n = len(runs)
+    base["overall"] = round(sum(r["overall"] for r in runs) / n, 4)
+    base["line_item_f1"] = round(sum(r["line_item_f1"] for r in runs) / n, 4)
+    base["avg_latency_s"] = round(sum(r["avg_latency_s"] for r in runs) / n, 2)
+    base["est_cost_per_doc"] = round(sum(r["est_cost_per_doc"] for r in runs) / n, 6)
+    base["trials"] = n
+    return base
+
+
 def main() -> None:
     docs = load_gold()
     print(f"gold set: {len(docs)} invoices ({', '.join(d.name for d in docs)})")
 
-    wanted = set(sys.argv[1:])
+    argv = sys.argv[1:]
+    trials = 1
+    if "--trials" in argv:
+        i = argv.index("--trials")
+        trials = int(argv[i + 1]); del argv[i:i + 2]
+    wanted = set(argv)
+    if trials > 1:
+        print(f"averaging over {trials} trials per config")
     configs = [(r, m) for m in MODELS for r in ("vlm", "ocr")]
     if wanted:
         configs = [(r, m) for (r, m) in configs if f"{r}:{m}" in wanted]
 
     results = []
     for reader, model in configs:
-        res = _run_config(reader, model, docs)
+        res = _run_config_avg(reader, model, docs, trials)
         if res is None:
             print(f"  - skip {reader}:{model} (no credentials / incompatible)")
             continue

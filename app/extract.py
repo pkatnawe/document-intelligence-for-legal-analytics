@@ -19,6 +19,7 @@ from app.documents.loader import load_pdf, png_to_data_uri
 from app.llm import client
 from app.observability import get_logger
 from app.store import JobStore
+from app.validation.normalize import normalize_invoice
 from app.validation.reconcile import reconcile
 from app.validation.schema import Invoice, JobStatus
 
@@ -122,6 +123,7 @@ def process_job(store: JobStore, job_id: str, data: bytes, filename: str | None 
             inputs = {"image_uri": png_to_data_uri(doc.page_images_png[0])}
 
         invoice, tier = run_extraction(**inputs)
+        invoice = normalize_invoice(invoice)  # derive aggregate tax from itemized tax lines
 
         # Correctness check beyond the schema: a well-typed result can still be factually
         # wrong (a weak model misreading amounts). If the line items don't reconcile with the
@@ -132,6 +134,7 @@ def process_job(store: JobStore, job_id: str, data: bytes, filename: str | None 
             rec("RECONCILE_WARNING", f"{warnings[0]}; escalating to {settings.tier2_model}")
             try:
                 inv2, tier2 = run_extraction(**inputs, premium=True)
+                inv2 = normalize_invoice(inv2)
                 if not reconcile(inv2):
                     invoice, tier, warnings = inv2, tier2, []
                     rec("ESCALATED", f"premium ({tier2}) reconciled")

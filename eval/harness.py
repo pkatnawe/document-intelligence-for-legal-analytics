@@ -128,8 +128,13 @@ def _field_correct(name: str, pred, gold) -> bool:
     if name == "currency":
         return _norm_currency(pred) == _norm_currency(gold)
     gp, gg = _norm_str(pred), _norm_str(gold)
-    if name in {"vendor", "bill_to", "payment_method"} and gp and gg:
-        return gp == gg or gp in gg or gg in gp  # lenient: containment for free-text identity
+    if name in {"vendor", "bill_to", "payment_method"}:
+        if not gg:                       # gold is null -> only null/empty is correct
+            return not gp
+        # Fair free-text match: every gold token present in the prediction. This accepts
+        # "American Express ending in 1004" for gold "American Express 1004", and the
+        # masked-digit forms ("****4043"), without rewarding a wrong card/name.
+        return set(gg.split()).issubset(set(gp.split())) or gg in gp or gp in gg
     return gp == gg
 
 

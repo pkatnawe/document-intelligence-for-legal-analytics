@@ -17,14 +17,18 @@ _RULES = """Read the whole document and reason about its layout before answering
 AMOUNTS
 - Transcribe every monetary value EXACTLY as printed, keeping its decimal point (3.17 is
   3.17, never 31.7). Use a '.' decimal separator; drop thousands separators and currency
-  symbols from numeric fields (put the currency code/symbol in `currency`).
+  symbols from numeric fields.
+- `currency`: output the ISO code — CAD, USD, EUR, GBP. Convert symbols (CA$ -> CAD, a bare
+  $ in a US address context -> USD).
 - `total` is the FINAL amount due or paid — the value labeled Total / Total Paid / Amount
   Due / Balance Due / Grand Total. `subtotal` is the amount labeled Subtotal (before
   tax/fees). NEVER swap them. If several totals appear (per page, running), use the final
   grand total. On a credit note / refund, `total` may be NEGATIVE.
-- `tax` is ONLY a value explicitly labeled tax / GST / HST / QST / VAT / sales tax. A tip,
-  gratuity, or service fee is NOT tax. If there are multiple tax lines, sum them into `tax`
-  AND list each as a line item.
+- `tax` is the SUM of EVERY tax line. Tax lines are labeled tax / sales tax / VAT, or the
+  Canadian codes GST / HST / PST / QST and their French equivalents TPS (= GST) and TVQ
+  (= QST). Add them ALL together — e.g. a receipt with both TPS and TVQ has tax = TPS + TVQ.
+  A Tip, gratuity, booking fee, reservation fee, surcharge, or service fee is **NOT** tax.
+  Also list each tax line in `line_items`.
 
 LINE ITEMS
 - Put EVERY charge row in `line_items`, each read exactly: fares, fees, taxes, tips,
