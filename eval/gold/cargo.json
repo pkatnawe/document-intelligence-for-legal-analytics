@@ -1,0 +1,21 @@
+{
+  "source": "case_interview_dataset.pdf#page=2",
+  "doc_type": "subscription_receipt",
+  "notes": "Cargo subscription receipt, image-only, paid. One line (Cargo Subscription $99), Tax/VAT $0, total $99 USD. No 'Subtotal' label, so subtotal is null. Billed-to is an email address. The single line item equals the total.",
+  "invoice": {
+    "invoice_number": "2011981",
+    "invoice_date": "2025-07-01",
+    "due_date": null,
+    "purchase_order": null,
+    "vendor": "Cargo Collective, Inc.",
+    "bill_to": "p.tchomakov@outlook.com",
+    "currency": "USD",
+    "subtotal": null,
+    "tax": 0.0,
+    "total": 99.00,
+    "payment_method": "American Express 1004",
+    "line_items": [
+      {"description": "Cargo Subscription", "amount": 99.00}
+    ]
+  }
+}

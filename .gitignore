@@ -10,3 +10,6 @@ __pycache__/
 *.egg-info/
 data/
 .venv/
+
+# eval run artifacts (regenerated)
+eval/results.json

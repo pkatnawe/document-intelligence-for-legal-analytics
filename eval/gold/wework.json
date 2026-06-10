@@ -1,0 +1,22 @@
+{
+  "source": "case_interview_dataset.pdf#page=1",
+  "doc_type": "invoice",
+  "notes": "WeWork formal invoice, image-only, PAID IN FULL. One service line (workspace) + GST 5%. GST is listed as a line item AND populates `tax` (per the extraction rules), so line_items sum to the 36.75 total. No card/payment method shown.",
+  "invoice": {
+    "invoice_number": "PXC7PUAWY2HY-1",
+    "invoice_date": "2025-06-17",
+    "due_date": null,
+    "purchase_order": null,
+    "vendor": "WeWork Canada LP ULC",
+    "bill_to": "Pentcho Tchomakov",
+    "currency": "CAD",
+    "subtotal": 35.00,
+    "tax": 1.75,
+    "total": 36.75,
+    "payment_method": null,
+    "line_items": [
+      {"description": "On Demand Shared Workspace", "amount": 35.00},
+      {"description": "GST (5%)", "amount": 1.75}
+    ]
+  }
+}

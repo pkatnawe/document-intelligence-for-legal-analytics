@@ -1,0 +1,30 @@
+{
+  "source": "case_interview_dataset.pdf#page=0",
+  "doc_type": "ride_receipt",
+  "notes": "Uber ride receipt, image-only. No invoice number (ride receipts have none). TPS (GST 5%) and TVQ (QST) are the real taxes; the CA$11.03 'Tip' is NOT tax. 'Subtotal 34.08' = Base+Distance+Time and is a summary row (excluded from line_items). All 10 atomic charge rows sum to the 64.46 total.",
+  "invoice": {
+    "invoice_number": null,
+    "invoice_date": "2025-06-17",
+    "due_date": null,
+    "purchase_order": null,
+    "vendor": "Uber",
+    "bill_to": "Pentcho",
+    "currency": "CAD",
+    "subtotal": 34.08,
+    "tax": 6.96,
+    "total": 64.46,
+    "payment_method": "Apple Pay Visa 4043",
+    "line_items": [
+      {"description": "Base Fare", "amount": 3.17},
+      {"description": "Distance", "amount": 19.12},
+      {"description": "Time", "amount": 11.79},
+      {"description": "Reservation Fee", "amount": 1.00},
+      {"description": "Booking Fee", "amount": 6.00},
+      {"description": "Montreal Airport Surcharge", "amount": 4.49},
+      {"description": "MTQ Dues", "amount": 0.90},
+      {"description": "Tip", "amount": 11.03},
+      {"description": "TVQ", "amount": 4.64},
+      {"description": "TPS", "amount": 2.32}
+    ]
+  }
+}
