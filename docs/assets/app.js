@@ -19,6 +19,7 @@ const NAV = [
   {g:'Platform', items:[
     {f:'dev-loop.html',       n:'⑦ Dev / Test / Deploy',     s:'d'},
     {f:'eval.html',           n:'✓ Evaluation & Improvement', s:'d'},
+    {f:'experiments.html',    n:'🔬 Experiments & Results',   s:'d'},
     {f:'cost.html',           n:'💵 Cost & ROI',              s:'d'},
   ]},
   {g:'Reference', items:[
